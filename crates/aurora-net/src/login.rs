@@ -10,7 +10,7 @@ use uuid::Uuid;
 pub const SL_MAIN_GRID: &str = "https://login.agni.lindenlab.com/cgi-bin/login.cgi";
 pub const SL_BETA_GRID: &str = "https://login.aditi.lindenlab.com/cgi-bin/login.cgi";
 
-pub const CHANNEL: &str = "Aurora Viewer";
+pub const CHANNEL: &str = "Rookery Isles Viewer";
 
 #[derive(Debug, Clone)]
 pub enum StartLocation {
@@ -267,7 +267,10 @@ fn refusal(v: &Llsd) -> LoginError {
     }
 }
 
-fn split_username(username: &str) -> (String, String) {
+/// The first and last name a typed user name is sent as ("Resident" when
+/// there is only one word). Public for the Rookery character select, which
+/// must name the account exactly as the login does.
+pub fn split_username(username: &str) -> (String, String) {
     let t = username.trim();
     let mut parts = t.split([' ', '.']).filter(|s| !s.is_empty());
     let first = parts.next().unwrap_or("").to_owned();

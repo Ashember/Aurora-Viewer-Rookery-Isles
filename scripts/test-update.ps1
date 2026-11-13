@@ -29,7 +29,7 @@ try {
         $env:AURORA_UPDATE_TEST_VERSION = "v$version"
         cargo build --locked -p aurora-viewer
         if ($LASTEXITCODE -ne 0) { throw "Build $version failed." }
-        $out = if ($version -eq '0.2.100') { Join-Path $taskRoot 'install' } else { Join-Path $taskFeed "Aurora-Viewer-v$version-windows-x64" }
+        $out = if ($version -eq '0.2.100') { Join-Path $taskRoot 'install' } else { Join-Path $taskFeed "Rookery-Isles-Viewer-v$version-windows-x64" }
         & "$PSScriptRoot/package.ps1" -Exe (Join-Path $taskRepoRoot 'target/debug/aurora-viewer.exe') -Out $out
     }
 } finally {
@@ -38,12 +38,12 @@ try {
 # Restore the normal Git version in the worktree's ordinary build.
 cargo build --locked -p aurora-viewer
 if ($LASTEXITCODE -ne 0) { throw 'Failed to restore the normal build.' }
-$name = "Aurora-Viewer-v$next-windows-x64.zip"
+$name = "Rookery-Isles-Viewer-v$next-windows-x64.zip"
 $zip = Join-Path $taskFeed $name
 # Entries named with `/`: Compress-Archive of Windows PowerShell 5.1 writes
 # `\`, which the updater refuses ("unsafe ZIP path").
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
-$taskPackage = (Resolve-Path -LiteralPath (Join-Path $taskFeed "Aurora-Viewer-v$next-windows-x64")).Path
+$taskPackage = (Resolve-Path -LiteralPath (Join-Path $taskFeed "Rookery-Isles-Viewer-v$next-windows-x64")).Path
 $taskArchive = [IO.Compression.ZipFile]::Open($zip, [IO.Compression.ZipArchiveMode]::Create)
 try {
     foreach ($file in Get-ChildItem -LiteralPath $taskPackage -Recurse -File) {

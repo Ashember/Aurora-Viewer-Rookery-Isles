@@ -70,6 +70,8 @@ pub(super) fn controls(
     match crate::login_accounts::grid(&account.uri) {
         GridChoice::SecondLife => account.uri = aurora_net::login::SL_MAIN_GRID.into(),
         GridChoice::SecondLifeBeta => account.uri = aurora_net::login::SL_BETA_GRID.into(),
+        // built in: its address is fixed, no field to type it in
+        GridChoice::Custom if crate::grids::is_rookery(&account.uri) => account.uri = crate::grids::ROOKERY_LOGIN.into(),
         GridChoice::Custom => {
             if crate::login_accounts::grid(&account.uri) != GridChoice::Custom {
                 account.uri.clear();
@@ -214,7 +216,7 @@ pub fn show(
                                     .fit_to_exact_size(Vec2::splat((if screen.height() < 800.0 { 32.0 } else { 64.0 }) * layout.scale)),
                             );
                         }
-                        ui.label(RichText::new("Aurora Viewer").size(28.0 * layout.text_scale).strong().color(p.ink));
+                        ui.label(RichText::new("Rookery Isles Viewer").size(28.0 * layout.text_scale).strong().color(p.ink));
                         ui.label(
                             RichText::new(crate::ui::login::client_tagline())
                                 .size(13.0 * layout.text_scale)
@@ -633,6 +635,10 @@ pub fn show(
                         form.editing = true;
                         form.focused = false;
                     }
+                });
+                // the selected account's grid: its own account pages
+                ui.vertical_centered(|ui| {
+                    super::account_links(ui, p, &crate::grids::account_pages(&settings.login_uri(), &settings.grids));
                 });
             });
     }
@@ -1712,7 +1718,8 @@ mod tests {
         assert!(text_rect(&output, &aurora_i18n::tr!("login-accounts-count", count = 1)).is_none());
         assert!(text_rect(&output, aurora_i18n::tr!("ui-login-remember-password")).is_none());
         assert!(text_rect(&output, aurora_i18n::tr!("login-accounts-last-place")).is_some());
-        let grid = text_rect(&output, "Second Life").expect("grid selector").center();
+        // a fresh install is on the built-in Rookery Isles grid
+        let grid = text_rect(&output, crate::grids::ROOKERY_NAME).expect("grid selector").center();
         let click = |pos, pressed| {
             vec![
                 egui::Event::PointerMoved(pos),

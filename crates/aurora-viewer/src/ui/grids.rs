@@ -30,6 +30,7 @@ pub fn selector(ui: &mut egui::Ui, catalogue: &[Grid], uri: &mut String) {
     let selected = match crate::login_accounts::grid(uri) {
         crate::settings::GridChoice::SecondLife => "Second Life",
         crate::settings::GridChoice::SecondLifeBeta => "Aditi",
+        crate::settings::GridChoice::Custom if grids::is_rookery(uri) => grids::ROOKERY_NAME,
         crate::settings::GridChoice::Custom => catalogue
             .iter()
             .find(|grid| selected_uri.is_some() && grids::service(&grid.login).ok() == selected_uri)
@@ -41,6 +42,13 @@ pub fn selector(ui: &mut egui::Ui, catalogue: &[Grid], uri: &mut String) {
         .truncate()
         .selected_text(selected)
         .show_ui(ui, |ui| {
+            // Rookery Isles Viewer: its home grid first, above Second Life
+            if ui
+                .selectable_label(grids::is_rookery(uri), grids::ROOKERY_NAME)
+                .clicked()
+            {
+                *uri = grids::ROOKERY_LOGIN.to_owned();
+            }
             ui.selectable_value(uri, aurora_net::login::SL_MAIN_GRID.to_owned(), "Second Life");
             ui.selectable_value(uri, aurora_net::login::SL_BETA_GRID.to_owned(), "Aditi");
             for grid in catalogue {
@@ -174,6 +182,8 @@ impl Manager {
                 ui.allocate_ui_with_layout(Vec2::new(sidebar, height + 38.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                     ui.set_width(sidebar);
                     ui.label(RichText::new(aurora_i18n::tr!("grids-built-in")).size(11.5).color(p.muted));
+                    ui.add_enabled(false, egui::Button::new(grids::ROOKERY_NAME).min_size(Vec2::new(sidebar, 28.0)))
+                        .on_hover_text(grids::ROOKERY_LOGIN);
                     for name in ["Second Life", "Aditi"] {
                         ui.add_enabled(false, egui::Button::new(name).min_size(Vec2::new(sidebar, 28.0)))
                             .on_hover_text(aurora_i18n::tr!("grids-error-protected"));

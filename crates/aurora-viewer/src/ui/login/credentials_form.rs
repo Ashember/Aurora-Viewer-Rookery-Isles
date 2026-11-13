@@ -221,6 +221,9 @@ pub fn content(
     )
     .clicked()
         || (can && enter && !egui::Popup::is_any_open(ui.ctx()));
+    // the chosen grid's own "Create an account" and "Forgot password?"
+    ui.add_space(6.0);
+    super::account_links(ui, p, &crate::grids::account_pages(&settings.login_uri(), &settings.grids));
     if pressed {
         settings.remember_username = true;
         form.show_password = false;

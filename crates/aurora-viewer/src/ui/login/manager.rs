@@ -51,6 +51,7 @@ fn grid_name(account: &Account) -> &'static str {
     match crate::login_accounts::grid(&account.uri) {
         GridChoice::SecondLife => "Second Life",
         GridChoice::SecondLifeBeta => "Aditi",
+        GridChoice::Custom if crate::grids::is_rookery(&account.uri) => crate::grids::ROOKERY_NAME,
         GridChoice::Custom => aurora_i18n::tr!("ui-login-other-grid"),
     }
 }

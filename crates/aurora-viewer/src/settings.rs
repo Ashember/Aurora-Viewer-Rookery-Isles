@@ -2087,8 +2087,10 @@ impl Default for Settings {
             remember_password: false,
             debug_settings_changed_only: false,
             debug_settings_warning_ignored: false,
-            grid: GridChoice::SecondLife,
-            custom_login_uri: "http://127.0.0.1:9000/".into(),
+            // Rookery Isles Viewer: opens on the Rookery Isles grid. Second Life
+            // stays selectable in the grid list.
+            grid: GridChoice::Custom,
+            custom_login_uri: crate::grids::ROOKERY_LOGIN.into(),
             grids: Vec::new(),
             start_location: "last".into(),
             start_region: String::new(),
@@ -2566,7 +2568,7 @@ pub fn config_dir() -> PathBuf {
 
 /// The settings folder before the demo's subfolder.
 pub(crate) fn default_config_root() -> PathBuf {
-    directories::ProjectDirs::from("org", "Aurora", "AuroraViewer")
+    directories::ProjectDirs::from("org", "Rookery", "RookeryIslesViewer")
         .map(|d| d.config_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."))
 }
@@ -2608,7 +2610,7 @@ pub fn asset_cache_dir() -> PathBuf {
 }
 
 pub(crate) fn default_cache_root() -> PathBuf {
-    directories::ProjectDirs::from("org", "Aurora", "AuroraViewer")
+    directories::ProjectDirs::from("org", "Rookery", "RookeryIslesViewer")
         .map(|d| d.cache_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("cache"))
 }
@@ -2630,7 +2632,7 @@ pub fn media_plugins_dir() -> PathBuf {
     if let Some(test) = aurora_updater::test_environment() {
         return test.root.join("media-plugins");
     }
-    directories::ProjectDirs::from("org", "Aurora", "AuroraViewer")
+    directories::ProjectDirs::from("org", "Rookery", "RookeryIslesViewer")
         .map(|d| d.data_local_dir().join("media-plugins"))
         .unwrap_or_else(|| PathBuf::from("media-plugins"))
 }

@@ -496,10 +496,16 @@ const FILLED: &[(&str, &[u8])] = svg_list!(
 );
 
 /// Brand SVGs (white wolf silhouette of assets/branding/), drawn untinted or tinted.
-const BRAND_SVGS: &[(&str, &[u8])] = &[("wolf", include_bytes!("../../../../assets/branding/aurora-logo-white.svg"))];
+/// Rookery Isles Viewer: Aurora's wolf is replaced by the Rookery Isles
+/// emblem, a PNG under the same name (PNGS). Aurora's was:
+/// ("wolf", include_bytes!("../../../../assets/branding/aurora-logo-white.svg"))
+const BRAND_SVGS: &[(&str, &[u8])] = &[];
 
 /// Raster images kept as PNG (brand logo).
-const PNGS: &[(&str, &[u8])] = &[("phoenix_18", include_bytes!("../../assets/icons/phoenix_18.png"))];
+const PNGS: &[(&str, &[u8])] = &[
+    ("phoenix_18", include_bytes!("../../assets/icons/phoenix_18.png")),
+    ("wolf", include_bytes!("../../../../assets/branding/rookery-emblem-white.png")),
+];
 
 /// Firestorm icon names used by skins / layouts -> Tabler icon.
 const ALIASES: &[(&str, &str)] = &[

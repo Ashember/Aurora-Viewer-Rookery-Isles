@@ -124,11 +124,11 @@ fn zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
 }
 fn valid_zip() -> Vec<u8> {
     zip(&[
-        ("Aurora-Viewer-v0.3.0-windows-x64/aurora-viewer.exe", b"new viewer"),
-        ("Aurora-Viewer-v0.3.0-windows-x64/assets/character/avatar.llm", b"avatar"),
-        ("Aurora-Viewer-v0.3.0-windows-x64/LICENSE", b"license"),
+        ("Rookery-Isles-Viewer-v0.3.0-windows-x64/aurora-viewer.exe", b"new viewer"),
+        ("Rookery-Isles-Viewer-v0.3.0-windows-x64/assets/character/avatar.llm", b"avatar"),
+        ("Rookery-Isles-Viewer-v0.3.0-windows-x64/LICENSE", b"license"),
         (
-            "Aurora-Viewer-v0.3.0-windows-x64/aurora-install.json",
+            "Rookery-Isles-Viewer-v0.3.0-windows-x64/aurora-install.json",
             br#"{"schema":1,"version":"0.3.0"}"#,
         ),
     ])
@@ -230,8 +230,8 @@ fn invalid_zip_paths_and_case_aliases_do_not_escape_staging() {
     for entries in [
         vec![("../escape.txt", b"bad".as_slice())],
         vec![
-            ("Aurora-Viewer-v0.3.0-windows-x64/FILE", b"a".as_slice()),
-            ("Aurora-Viewer-v0.3.0-windows-x64/file", b"b".as_slice()),
+            ("Rookery-Isles-Viewer-v0.3.0-windows-x64/FILE", b"a".as_slice()),
+            ("Rookery-Isles-Viewer-v0.3.0-windows-x64/file", b"b".as_slice()),
         ],
     ] {
         let temp = Temp::new();

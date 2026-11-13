@@ -8,9 +8,12 @@ use semver::Version;
 use serde::Deserialize;
 use std::time::Duration;
 
-pub const RELEASES: &str = "https://api.github.com/repos/Aurora-Viewer/Aurora-Viewer/releases?per_page=100";
-pub const RELEASE_PAGE: &str = "https://github.com/Aurora-Viewer/Aurora-Viewer/releases";
-const DOWNLOADS: &str = "https://github.com/Aurora-Viewer/Aurora-Viewer/releases/download";
+// Rookery Isles Viewer: updates come from the Rookery Isles repository's
+// releases, never upstream Aurora's, so an update never replaces this build
+// with an unbranded one.
+pub const RELEASES: &str = "https://api.github.com/repos/Ashember/Aurora-Viewer-Rookery-Isles/releases?per_page=100";
+pub const RELEASE_PAGE: &str = "https://github.com/Ashember/Aurora-Viewer-Rookery-Isles/releases";
+const DOWNLOADS: &str = "https://github.com/Ashember/Aurora-Viewer-Rookery-Isles/releases/download";
 pub const POLICY: &str = "aurora-update-policy.json";
 pub const MAX_ARCHIVE: u64 = 2 * 1024 * 1024 * 1024;
 /// How long an installation below a new minimum may still sign in, when
@@ -205,7 +208,7 @@ impl Source {
             return Ok(None);
         }
         self.validate_url(&r.html_url)?;
-        let expected = format!("Aurora-Viewer-{}-windows-x64.zip", r.tag_name);
+        let expected = format!("Rookery-Isles-Viewer-{}-windows-x64.zip", r.tag_name);
         let archive = r
             .assets
             .iter()
@@ -367,7 +370,7 @@ mod tests {
         let production = Source::default();
         assert!(
             production
-                .validate_url("https://github.com/Aurora-Viewer/Aurora-Viewer/releases")
+                .validate_url("https://github.com/Ashember/Aurora-Viewer-Rookery-Isles/releases")
                 .is_ok()
         );
         for url in [

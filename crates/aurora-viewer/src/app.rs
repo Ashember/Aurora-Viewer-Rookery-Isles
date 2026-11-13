@@ -335,7 +335,10 @@ const PAUSED_RESOLUTION_DIVISOR: u32 = 16;
 /// The wolf logo (window icon, login and loading screens, About, system
 /// notifications), read from the branding folder: one file for the viewer,
 /// the README and the exe icon.
-pub(crate) const LOGO_PNG: &[u8] = include_bytes!("../../../assets/branding/aurora-logo.png");
+// Rookery Isles Viewer: its own logo (Aurora's trademark policy), the
+// black canvas of the Rookery Isles art cut away.
+// Aurora's was: include_bytes!("../../../assets/branding/aurora-logo.png")
+pub(crate) const LOGO_PNG: &[u8] = include_bytes!("../../../assets/branding/rookery-logo-cut.png");
 
 struct LogoData {
     ui: egui::ColorImage,
@@ -3195,6 +3198,81 @@ impl App {
         self.settings.last_login = Some(self.settings.login_key());
         self.settings.save();
         self.net.send(NetCommand::Login(Box::new(req)));
+    }
+
+    /// Rookery Isles: the character select in the Rookery Gate, the small
+    /// always-up region every login lands in (crate::characters). It opens
+    /// once per session on arriving there; Play sends the avatar on to the
+    /// character's place, or offers to wait or go elsewhere when that region
+    /// is not accepting people yet.
+    fn gate_select(&mut self, ctx: &egui::Context, p: &crate::theme::Palette) {
+        let Some(login) = self.world.login.clone() else {
+            return;
+        };
+        let uri = self.settings.login_uri();
+        let Some(endpoint) = crate::characters::endpoint(&uri) else {
+            return;
+        };
+        let in_gate = self.world.region_name().eq_ignore_ascii_case(crate::grids::ROOKERY_GATE);
+        if in_gate && self.login_form.gate_offered != Some(login.session_id) {
+            self.login_form.gate_offered = Some(login.session_id);
+            self.login_form.characters = Some(Default::default());
+            self.character_request(endpoint.clone(), crate::characters::Action::List);
+        }
+        let Some(choice) = self.login_form.characters.as_mut().and_then(|select| select.show(ctx, p)) else {
+            return;
+        };
+        match choice {
+            ui::characters::Choice::Request(action) => self.character_request(endpoint, action),
+            ui::characters::Choice::LoadRegions => {
+                let Some(regions) = crate::characters::regions_endpoint(&uri) else {
+                    return;
+                };
+                let (tx, rx) = crossbeam_channel::bounded(1);
+                let repaint = self.egui_ctx.clone();
+                self.net.runtime().spawn(async move {
+                    let _ = tx.send(crate::characters::ready_regions(regions).await);
+                    repaint.request_repaint();
+                });
+                if let Some(select) = &mut self.login_form.characters {
+                    select.regions_pending = Some(rx);
+                }
+            }
+            ui::characters::Choice::Go(destination) => {
+                log::info!("character select: going to {} ({})", destination.region, destination.kind);
+                if self.teleport_to_location_looking(destination.region.clone(), destination.position(), destination.look_at()) {
+                    self.login_form.characters = None;
+                } else if let Some(select) = &mut self.login_form.characters {
+                    select.sent();
+                    select.error = Some(aurora_i18n::tr!("characters-teleport-refused").to_owned());
+                }
+            }
+            ui::characters::Choice::Close => self.login_form.characters = None,
+        }
+    }
+
+    /// One request of the character select, naming this viewer by its live
+    /// session and the secure id only it holds; the answer goes to the open
+    /// select (`ui::characters::Select`).
+    fn character_request(&mut self, endpoint: String, action: crate::characters::Action) {
+        let Some(login) = self.world.login.clone() else {
+            return;
+        };
+        let auth = crate::characters::Auth::Session {
+            session: login.session_id.to_string(),
+            secure: login.secure_session_id.to_string(),
+        };
+        let body = crate::characters::body(&auth, &action);
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let ctx = self.egui_ctx.clone();
+        self.net.runtime().spawn(async move {
+            let _ = tx.send(crate::characters::call(endpoint, body).await);
+            ctx.request_repaint();
+        });
+        if let Some(select) = &mut self.login_form.characters {
+            select.pending = Some(rx);
+            select.error = None;
+        }
     }
 
     fn back_to_login(&mut self, error: Option<String>) {
@@ -16887,6 +16965,8 @@ impl App {
                 );
             }
             Screen::World => {
+                // Rookery Isles: the character select, in the Rookery Gate
+                self.gate_select(&ctx, &p);
                 // the full-frame photo view: the world and its own strip only
                 if self.photo_full_frame() {
                     if self.context_menu.take().is_some() || self.build.menu_selection {

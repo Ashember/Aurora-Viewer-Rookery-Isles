@@ -17,6 +17,21 @@ Aurora Viewer is not provided, endorsed or supported by Linden Research, Inc.
 ("Linden Lab") or The Phoenix Firestorm Project, Inc. Second Life® is a
 trademark of Linden Research, Inc.
 
+## Rookery Isles Viewer
+
+The Rookery Isles Viewer is a modified version of Aurora Viewer, made for the
+Rookery Isles grid. It was modified by Rookery Isles starting on 13 November
+2026, and every change since is in the history of its repository,
+github.com/Ashember/Aurora-Viewer-Rookery-Isles. It carries its own name and
+icon, opens on the Rookery Isles grid, and takes its updates from that
+repository rather than from Aurora Viewer's.
+
+It is based on Aurora Viewer and is not Aurora Viewer: it is not provided,
+endorsed or supported by the Aurora Viewer team, and problems with it belong in
+its own repository. It is free software under the same licence, the GNU
+General Public License, version 3 or any later version, and all of the notices
+below still apply to it.
+
 ## Code derived from the Second Life viewer and Firestorm
 
 Many parts of this program are Rust ports of the Second Life viewer

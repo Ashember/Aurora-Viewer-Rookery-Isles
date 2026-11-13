@@ -48,6 +48,7 @@ mod gpu_load;
 mod graphics_presets;
 mod grid_status;
 mod grids;
+mod characters;
 mod high_contrast;
 mod hover_tips;
 mod ik_edit;

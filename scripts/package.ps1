@@ -8,7 +8,7 @@
 .EXAMPLE
     ./scripts/package.ps1 -Exe target/release/aurora-viewer.exe -Out Aurora-Viewer
 .EXAMPLE
-    ./scripts/package.ps1 -Exe target/release/aurora-viewer -Out Aurora-Viewer-v0.8.0-linux-x64
+    ./scripts/package.ps1 -Exe target/release/aurora-viewer -Out Rookery-Isles-Viewer-v0.8.0-linux-x64
 #>
 param(
     [Parameter(Mandatory)][string]$Exe,

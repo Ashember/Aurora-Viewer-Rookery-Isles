@@ -109,6 +109,11 @@ pub struct LoginForm {
     /// The camera's limits went back on with the settings' version 33
     /// (`Settings::camera_limits_restored`).
     pub camera_limits_restored: bool,
+    /// Rookery Isles: the character select, open in the Rookery Gate
+    /// (`crate::characters`, `App::gate_select`).
+    pub characters: Option<super::characters::Select>,
+    /// The session the select was last offered for: once per session.
+    pub gate_offered: Option<uuid::Uuid>,
 }
 
 impl LoginForm {
@@ -182,6 +187,55 @@ pub(crate) fn terms_link(ui: &mut egui::Ui, p: &Palette, url: &str) {
     {
         ui.ctx().open_url(egui::OpenUrl::new_tab(url));
     }
+}
+
+/// `account_links` for a right-to-left row (the old form's title line): the
+/// same links, laid out from the right, "Create an account" first in reading
+/// order.
+fn account_links_inline(ui: &mut egui::Ui, p: &Palette, pages: &crate::grids::AccountPages) {
+    ui.spacing_mut().item_spacing.x = 12.0;
+    for (label, url) in [
+        (aurora_i18n::tr!("ui-login-forgot-password"), &pages.password),
+        (aurora_i18n::tr!("grids-register"), &pages.register),
+    ] {
+        let Some(url) = url else {
+            continue;
+        };
+        if ui
+            .add(egui::Link::new(RichText::new(label).size(12.0).color(p.violet_pale)))
+            .on_hover_text(url.as_str())
+            .clicked()
+        {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+        }
+    }
+}
+
+/// "Create an account" and "Forgot password?" for the grid chosen for the
+/// login, opened in the browser. The pages are that grid's own
+/// (grids::account_pages); a link the grid has no page for is not shown.
+pub(crate) fn account_links(ui: &mut egui::Ui, p: &Palette, pages: &crate::grids::AccountPages) {
+    if pages.register.is_none() && pages.password.is_none() {
+        return;
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 14.0;
+        for (label, url) in [
+            (aurora_i18n::tr!("grids-register"), &pages.register),
+            (aurora_i18n::tr!("ui-login-forgot-password"), &pages.password),
+        ] {
+            let Some(url) = url else {
+                continue;
+            };
+            if ui
+                .add(egui::Link::new(RichText::new(label).size(12.5).color(p.violet_pale)))
+                .on_hover_text(url.as_str())
+                .clicked()
+            {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+            }
+        }
+    });
 }
 
 /// Animated aurora background (also behind the loading screens without a
@@ -732,7 +786,7 @@ pub fn show(
                     super::aurora_bg::radial_glow(&painter, r.center(), 150.0, p.violet, 0.42);
                 }
                 ui.add_space(2.0);
-                ui.label(RichText::new("Aurora Viewer").size(34.0).strong().color(p.ink));
+                ui.label(RichText::new("Rookery Isles Viewer").size(34.0).strong().color(p.ink));
                 ui.label(RichText::new(client_tagline()).size(13.0).color(p.violet_pale));
                 ui.add_space(18.0);
             });
@@ -741,7 +795,15 @@ pub fn show(
                 ui.spacing_mut().item_spacing.y = 6.0;
                 let enabled = !form.busy && !super::grids::is_open(&ctx);
                 ui.add_enabled_ui(enabled, |ui| {
-                    ui.label(RichText::new(aurora_i18n::tr!("ui-login-login")).size(18.0).strong().color(p.ink));
+                    // the grid's account pages on the title's line, so the
+                    // card is no taller in a low window
+                    let pages = crate::grids::account_pages(&settings.login_uri(), &settings.grids);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(aurora_i18n::tr!("ui-login-login")).size(18.0).strong().color(p.ink));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            account_links_inline(ui, p, &pages);
+                        });
+                    });
                     ui.add_space(6.0);
                     caption(ui, p, aurora_i18n::tr!("common-username"));
                     let user = field(
@@ -818,7 +880,7 @@ pub fn show(
                     });
                     let key = crate::login_favorites::key(&settings.login_uri(), &settings.username);
                     let favorite_chosen = StartFavorites::of(&form.favorites, &form.start_favorite, &key).chosen().is_some();
-                    if settings.grid == GridChoice::Custom {
+                    if settings.grid == GridChoice::Custom && !crate::grids::is_rookery(&settings.custom_login_uri) {
                         field(
                             ui,
                             p,

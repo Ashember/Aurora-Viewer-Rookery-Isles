@@ -83,6 +83,82 @@ fn protected(uri: &str) -> bool {
         .is_some_and(|host| host == "lindenlab.com" || host.ends_with(".lindenlab.com"))
 }
 
+/// Rookery Isles Viewer: the Rookery Isles grid is built in, like Second
+/// Life. It is the default grid, listed first, and cannot be removed or
+/// edited away. Its pages are the ones its get_grid_info publishes.
+pub const ROOKERY_NAME: &str = "Rookery Isles";
+pub const ROOKERY_SERVICE: &str = "http://play.rookery.pro:42000";
+pub const ROOKERY_LOGIN: &str = "http://play.rookery.pro:42000/login";
+/// The Rookery Gate: the small always-up region every login lands in first,
+/// where the character select runs (`crate::characters`).
+pub const ROOKERY_GATE: &str = "Rookery Gate";
+
+static ROOKERY: std::sync::LazyLock<Grid> = std::sync::LazyLock::new(|| Grid {
+    name: ROOKERY_NAME.into(),
+    nickname: "rookeryisles".into(),
+    service: ROOKERY_SERVICE.into(),
+    login: ROOKERY_LOGIN.into(),
+    gatekeeper: String::new(),
+    welcome: "http://play.rookery.pro:42000/welcome".into(),
+    register: "https://rookeryisles.com/grid/join".into(),
+    password: "https://rookeryisles.com/grid/forgot".into(),
+    help: "https://rookeryisles.com/grid/support".into(),
+    about: "https://rookeryisles.com/grid/about".into(),
+    search: String::new(),
+    profile: String::new(),
+    helper: "http://play.rookery.pro:42000/".into(),
+});
+
+/// The built-in Rookery Isles grid.
+pub fn rookery() -> &'static Grid {
+    &ROOKERY
+}
+
+/// Whether a login or discovery address is the Rookery Isles grid's (the
+/// root address an older build saved counts too).
+pub fn is_rookery(uri: &str) -> bool {
+    let Ok(address) = service(uri) else {
+        return false;
+    };
+    address == ROOKERY_SERVICE || service(ROOKERY_LOGIN).is_ok_and(|login| login == address)
+}
+
+/// Second Life's own account pages (where its pages redirect today).
+pub const SECOND_LIFE_JOIN: &str = "https://join.secondlife.com/";
+pub const SECOND_LIFE_FORGOT: &str = "https://accounts.secondlife.com/forgot_password/";
+
+/// The account pages of the grid a login address names: where to create an
+/// account and where to recover a password. Each belongs to that grid only:
+/// Rookery Isles sends people to rookeryisles.com, Second Life (and Aditi,
+/// which uses the same accounts) to Linden Lab, a saved grid to the pages it
+/// published. A grid that published none has none (no link is shown).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AccountPages {
+    pub register: Option<String>,
+    pub password: Option<String>,
+}
+
+pub fn account_pages(login_uri: &str, catalogue: &[Grid]) -> AccountPages {
+    let page = |url: &str| web_url(url).map(|_| url.trim().to_owned());
+    match crate::login_accounts::grid(login_uri) {
+        GridChoice::SecondLife | GridChoice::SecondLifeBeta => AccountPages {
+            register: Some(SECOND_LIFE_JOIN.to_owned()),
+            password: Some(SECOND_LIFE_FORGOT.to_owned()),
+        },
+        GridChoice::Custom => {
+            let login = service(login_uri).ok();
+            let grid = catalogue
+                .iter()
+                .find(|grid| login.is_some() && service(&grid.login).ok() == login)
+                .or_else(|| is_rookery(login_uri).then(rookery));
+            grid.map_or_else(AccountPages::default, |grid| AccountPages {
+                register: page(&grid.register),
+                password: page(&grid.password),
+            })
+        }
+    }
+}
+
 impl Grid {
     pub fn manual(address: &str) -> Result<Self, Error> {
         let address = service(address)?;
@@ -231,11 +307,16 @@ pub fn active(settings: &Settings) -> Option<&Grid> {
         .grids
         .iter()
         .find(|grid| service(&grid.login).ok().as_ref() == Some(&login))
+        .or_else(|| is_rookery(&login).then(rookery))
 }
 
 pub fn store(settings: &mut Settings, mut grid: Grid, previous: Option<&str>) -> Result<(), Error> {
     grid.validate()?;
     let login = service(&grid.login)?;
+    // the built-in Rookery Isles grid is never saved over
+    if is_rookery(&grid.service) || is_rookery(&login) {
+        return Err(Error::Protected);
+    }
     // One entry per discovery service or login endpoint, including spelling/trailing-slash variants.
     settings.grids.retain(|old| {
         Some(old.service.as_str()) != previous && old.service != grid.service && service(&old.login).ok().as_ref() != Some(&login)
@@ -249,7 +330,7 @@ pub fn store(settings: &mut Settings, mut grid: Grid, previous: Option<&str>) ->
 /// its discovery, login or gatekeeper address.
 pub fn known<'a>(settings: &'a Settings, address: &str) -> Option<&'a Grid> {
     let address = authority(address)?;
-    settings.grids.iter().find(|grid| {
+    settings.grids.iter().chain(std::iter::once(rookery())).find(|grid| {
         [&grid.service, &grid.login, &grid.gatekeeper]
             .into_iter()
             .any(|a| authority(a).as_deref() == Some(address.as_str()))
@@ -420,7 +501,7 @@ pub fn resolve(settings: &Settings, extras: Option<&OpenSimExtras>, destination:
     if same_grid {
         return Ok(location.region);
     }
-    let other = settings.grids.iter().find(|grid| {
+    let other = settings.grids.iter().chain(std::iter::once(rookery())).find(|grid| {
         authority(&grid.service).as_deref() == Some(target_authority)
             || authority(&grid.login).as_deref() == Some(target_authority)
             || authority(&grid.gatekeeper).as_deref() == Some(target_authority)
@@ -661,7 +742,10 @@ mod tests {
         let unknown = visiting("hg.unknown.example:80");
         assert_eq!(current_label(&settings, Some(&unknown)).as_deref(), Some("hg.unknown.example"));
         // Second Life has no Hypergrid address
-        let sl = Settings::default();
+        let sl = Settings {
+            grid: GridChoice::SecondLife,
+            ..Default::default()
+        };
         assert_eq!(current(&sl, Some(&away)), None);
     }
 
@@ -701,7 +785,13 @@ mod tests {
     fn grids_compare_by_any_of_their_addresses() {
         let settings = two_grids();
         assert_eq!(home(&settings).as_deref(), Some("gate.example:8003"));
-        assert_eq!(home(&Settings::default()), None);
+        assert_eq!(
+            home(&Settings {
+                grid: GridChoice::SecondLife,
+                ..Default::default()
+            }),
+            None
+        );
         assert_eq!(
             here(Some("gate.example:8003"), Some(&visiting("http://other.example:8002/"))).as_deref(),
             Some("other.example:8002")
@@ -751,7 +841,11 @@ mod tests {
             Some("https://grid.example/search?q=caf%C3%A9%20%26%20music")
         );
         // and nothing of this on Second Life
-        assert_eq!(opensim_search_url(&Settings::default(), Some(&region), "", "x", "en", 13), None);
+        let sl = Settings {
+            grid: GridChoice::SecondLife,
+            ..Default::default()
+        };
+        assert_eq!(opensim_search_url(&sl, Some(&region), "", "x", "en", 13), None);
     }
 
     #[test]
@@ -769,6 +863,56 @@ mod tests {
             "https://maps.home.example/"
         );
         assert_eq!(map_server(None, " "), "https://map.secondlife.com/");
+    }
+
+    #[test]
+    fn rookery_isles_is_the_built_in_default_grid() {
+        let settings = Settings::default();
+        assert_eq!(settings.grid, GridChoice::Custom);
+        assert_eq!(settings.login_uri(), ROOKERY_LOGIN);
+        assert!(settings.grids.is_empty(), "built in, not a saved entry");
+        let grid = active(&settings).expect("the Rookery Isles grid");
+        assert_eq!(grid.name, ROOKERY_NAME);
+        assert_eq!(current_label(&settings, None).as_deref(), Some(ROOKERY_NAME));
+        // the root address an earlier build saved is the same grid
+        assert!(is_rookery("http://play.rookery.pro:42000/"));
+        assert!(is_rookery("play.rookery.pro:42000/login"));
+        assert!(!is_rookery("http://play.rookery.pro:42001/"));
+        assert!(!is_rookery(aurora_net::login::SL_MAIN_GRID));
+        // it cannot be saved over
+        let mut settings = Settings::default();
+        assert_eq!(
+            store(&mut settings, Grid::manual(ROOKERY_SERVICE).expect("grid"), None),
+            Err(Error::Protected)
+        );
+        assert!(settings.grids.is_empty());
+        // its regions are this grid's
+        assert_eq!(
+            resolve(&settings, None, "hop://play.rookery.pro:42000/Memory%20Alpha/128/128/30"),
+            Ok("Memory Alpha".into())
+        );
+    }
+
+    #[test]
+    fn account_pages_belong_to_the_grid_chosen() {
+        let rookery = account_pages(ROOKERY_LOGIN, &[]);
+        assert_eq!(rookery.register.as_deref(), Some("https://rookeryisles.com/grid/join"));
+        assert_eq!(rookery.password.as_deref(), Some("https://rookeryisles.com/grid/forgot"));
+        // the root address an earlier build saved too
+        assert_eq!(account_pages("http://play.rookery.pro:42000/", &[]), rookery);
+        for sl in [aurora_net::login::SL_MAIN_GRID, aurora_net::login::SL_BETA_GRID] {
+            let pages = account_pages(sl, &[]);
+            assert_eq!(pages.register.as_deref(), Some(SECOND_LIFE_JOIN));
+            assert_eq!(pages.password.as_deref(), Some(SECOND_LIFE_FORGOT));
+        }
+        // a saved grid: the pages it published, none when it published none
+        let mut other = Grid::manual("https://other.example:8002").expect("grid");
+        other.password = "https://other.example/forgot".into();
+        let catalogue = vec![other.clone()];
+        let pages = account_pages(&other.login, &catalogue);
+        assert_eq!(pages.password.as_deref(), Some("https://other.example/forgot"));
+        assert_eq!(pages.register, None);
+        assert_eq!(account_pages("https://unknown.example/", &catalogue), AccountPages::default());
     }
 
     #[test]
