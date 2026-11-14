@@ -5897,6 +5897,8 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_APPEARANCE=<mode>` | Appearance window and outfits |
 | `AURORA_DEMO_AVATAR_STUDIO=1|white|reveal|cycle|pedestal|t-pose|a-pose|grounding|hover-height|hover-menu|environment|pose-cycle|pose-menu|lighting-menu|animation-editor|animation-editor-hover|animation-jump` | Studio backdrop, transitions, grounded poses, display hover height, lighting, menu previews and the native animation editor |
 | `AURORA_DEMO_ROOKERY_CREATOR=1\|dressed` | The Rookery Isles Character Creator on a new character at frame 600, on the Avatar Studio stage; with `AURORA_ROOKERY_PACK_DIR=<pack folder>` the body pack is read from that folder (tools/makehuman/rookery_body/pack.py output) instead of the grid; `dressed` puts hair, an outfit and shoes on at frame 800 |
+| `AURORA_DEMO_ROOKERY_WEAR=<id>,<id>...` | With the creator demo: those pack items worn at frame 800 (an eye colour id, a hair id, clothes ids, as body.json names them) |
+| `AURORA_DEMO_ROOKERY_FACE=1` | With the creator demo: the camera framed on the face at frame 900 |
 | `AURORA_DEMO_OUTFITS=<count>[,closed][,scroll][,locate]` | A large wardrobe in the Appearance demo: generated outfits, the window closed, scrolled or located on the current outfit |
 | `AURORA_DEMO_OUTFIT_RESTORE=warm\|cold` | The outfit's attachments restored at login against a region that puts part of it back by itself |
 | `AURORA_DEMO_SHAPE=<mode>` | Worn shape editor and permission scenarios |

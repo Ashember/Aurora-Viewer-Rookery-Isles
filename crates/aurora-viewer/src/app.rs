@@ -3231,6 +3231,35 @@ impl App {
                     .collect();
                 log::info!("demo character creator: dressed in {:?}, hair {:?}", creator.look.clothes, creator.look.hair);
             }
+            // AURORA_DEMO_ROOKERY_WEAR=<content id>,<content id>...: those
+            // items worn at frame 800 (an eye colour, a hair, clothes), to
+            // look at named items (2026-11-14)
+            if self.frame_count == 800
+                && let Ok(wear) = std::env::var("AURORA_DEMO_ROOKERY_WEAR")
+                && let (Some(creator), Some(pack)) = (self.creator.as_mut(), self.scene.rookery_pack())
+            {
+                for id in wear.split(',').map(str::trim).filter(|id| !id.is_empty()) {
+                    if pack.content.eyecolour.iter().any(|s| s.id == id) {
+                        creator.look.eye_colour = id.to_owned();
+                    } else if pack.content.proxy(id).is_some_and(|p| p.kind == "hair") {
+                        creator.look.hair = Some(id.to_owned());
+                    } else if pack.content.proxy(id).is_some() {
+                        creator.look.clothes.push(id.to_owned());
+                    } else {
+                        log::warn!("demo character creator: no item {id} in the pack");
+                    }
+                }
+                log::info!(
+                    "demo character creator: wearing eyes {}, hair {:?}, clothes {:?}",
+                    creator.look.eye_colour,
+                    creator.look.hair,
+                    creator.look.clothes
+                );
+            }
+            // AURORA_DEMO_ROOKERY_FACE=1: the camera on the face at frame 900
+            if self.frame_count == 900 && std::env::var_os("AURORA_DEMO_ROOKERY_FACE").is_some() && self.creator.is_some() {
+                self.avatar_studio.frame_face();
+            }
             if self.creator.is_some() {
                 self.creator_frame(ctx, p, "http://127.0.0.1:9/rookery/characters".to_owned());
             }
