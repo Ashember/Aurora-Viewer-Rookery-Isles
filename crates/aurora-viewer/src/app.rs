@@ -67,6 +67,8 @@ mod texture_picker;
 use folders::chat_log_root;
 mod admin_status;
 mod avatar_studio;
+/// The Rookery Isles Character Creator on the Avatar Studio stage.
+mod character_creator;
 mod contents_drop_demo;
 mod contents_folder_drag_demo;
 mod dof;
@@ -433,6 +435,8 @@ pub struct App {
     sky_log: crate::world::env::SkyLog,
     camera: Camera,
     avatar_studio: crate::avatar_studio::Studio,
+    /// The Rookery Isles Character Creator, open (app/character_creator.rs).
+    creator: Option<crate::ui::character_creator::Creator>,
     studio_transition: crate::avatar_studio::Transition,
     studio_photo_session: Option<crate::avatar_studio::PhotoSession>,
     /// The desktop camera, and our avatar's yaw and pitch, before VR: put
@@ -1663,6 +1667,7 @@ impl App {
             sky_log: Default::default(),
             camera: Camera::default(),
             avatar_studio: Default::default(),
+            creator: None,
             studio_transition: Default::default(),
             studio_photo_session: None,
             vr_camera: None,
@@ -3206,13 +3211,46 @@ impl App {
     /// character's place, or offers to wait or go elsewhere when that region
     /// is not accepting people yet.
     fn gate_select(&mut self, ctx: &egui::Context, p: &crate::theme::Palette) {
+        // offline demo (docs/TESTING.md): the Character Creator on a new
+        // character at frame 600, its pack read from AURORA_ROOKERY_PACK_DIR
+        if self.demo && std::env::var_os("AURORA_DEMO_ROOKERY_CREATOR").is_some() {
+            if self.frame_count == 600 && self.creator.is_none() {
+                self.scene.set_rookery_grid(Some("http://127.0.0.1:9".to_owned()));
+                self.open_creator("demo".into(), "Demo Character".into(), None);
+            }
+            // AURORA_DEMO_ROOKERY_CREATOR=dressed: hair, an outfit and shoes
+            // put on at frame 800, once the pack is read
+            if self.frame_count == 800
+                && std::env::var("AURORA_DEMO_ROOKERY_CREATOR").is_ok_and(|mode| mode == "dressed")
+                && let (Some(creator), Some(pack)) = (self.creator.as_mut(), self.scene.rookery_pack())
+            {
+                creator.look.hair = pack.content.hair.iter().find(|h| h.licence == "CC0").map(|h| h.id.clone());
+                creator.look.clothes = ["Outfits", "Shoes"]
+                    .iter()
+                    .filter_map(|shelf| pack.content.clothes.iter().find(|c| c.category == *shelf).map(|c| c.id.clone()))
+                    .collect();
+                log::info!("demo character creator: dressed in {:?}, hair {:?}", creator.look.clothes, creator.look.hair);
+            }
+            if self.creator.is_some() {
+                self.creator_frame(ctx, p, "http://127.0.0.1:9/rookery/characters".to_owned());
+            }
+            return;
+        }
         let Some(login) = self.world.login.clone() else {
             return;
         };
         let uri = self.settings.login_uri();
+        // the Rookery body: drawn on this grid only
+        self.scene.set_rookery_grid(
+            crate::grids::is_rookery(&uri).then(|| crate::grids::ROOKERY_SERVICE.to_owned()),
+        );
         let Some(endpoint) = crate::characters::endpoint(&uri) else {
             return;
         };
+        if self.creator.is_some() {
+            self.creator_frame(ctx, p, endpoint);
+            return;
+        }
         let in_gate = self.world.region_name().eq_ignore_ascii_case(crate::grids::ROOKERY_GATE);
         if in_gate && self.login_form.gate_offered != Some(login.session_id) {
             self.login_form.gate_offered = Some(login.session_id);
@@ -3240,7 +3278,15 @@ impl App {
             }
             ui::characters::Choice::Go(destination) => {
                 log::info!("character select: going to {} ({})", destination.region, destination.kind);
-                if self.teleport_to_location_looking(destination.region.clone(), destination.position(), destination.look_at()) {
+                // by the region's map place when the grid gave it: a facet's
+                // name is not one the map search knows
+                let sent = match destination.handle() {
+                    Some(handle) if !destination.region.eq_ignore_ascii_case(&self.world.region_name()) => {
+                        self.teleport_to_handle(handle, &destination.region, destination.position(), destination.look_at())
+                    }
+                    _ => self.teleport_to_location_looking(destination.region.clone(), destination.position(), destination.look_at()),
+                };
+                if sent {
                     self.login_form.characters = None;
                 } else if let Some(select) = &mut self.login_form.characters {
                     select.sent();
@@ -3248,6 +3294,7 @@ impl App {
                 }
             }
             ui::characters::Choice::Close => self.login_form.characters = None,
+            ui::characters::Choice::EditLook(id, name, look) => self.open_creator(id, name, look),
         }
     }
 
@@ -4988,7 +5035,10 @@ impl App {
             && pressed
             && input == Input::key(winit::keyboard::KeyCode::Escape)
         {
-            self.panels.avatar_studio = false;
+            // the Character Creator is left by its own Save or Cancel
+            if self.creator.is_none() {
+                self.panels.avatar_studio = false;
+            }
             return;
         }
         let mods = self.binding_mods(matches!(input, Input::Mouse(_)));
@@ -7097,6 +7147,22 @@ impl App {
                 None
             }
         }
+    }
+
+    /// A teleport to a region by its handle (the character select's
+    /// destinations carry their map place). Whether it started.
+    fn teleport_to_handle(&mut self, handle: u64, label: &str, pos: Vec3, look_at: Vec3) -> bool {
+        let command = NetCommand::TeleportTo {
+            handle,
+            position: pos,
+            look_at,
+        };
+        if !self.user_teleport_allowed(&command) {
+            return false;
+        }
+        self.begin_teleport(format!("{} ({:.0}, {:.0}, {:.0})", label, pos.x, pos.y, pos.z), true);
+        self.send(command);
+        true
     }
 
     /// Whether the teleport started (false: refused or not found).

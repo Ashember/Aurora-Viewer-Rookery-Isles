@@ -57,6 +57,8 @@ pub(crate) mod give_drop;
 pub mod grid_status;
 pub mod grids;
 pub mod characters;
+/// The Rookery Isles Character Creator (Rookery add-on).
+pub mod character_creator;
 pub mod group_profile;
 pub mod group_titles;
 pub mod hover_height;

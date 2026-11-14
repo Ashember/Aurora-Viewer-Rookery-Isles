@@ -13,6 +13,11 @@
 //! The grid decides everything (which worlds exist, name rules, the three
 //! slots, where a character goes); this module carries the requests and the
 //! answers.
+//!
+//! Nobody enters the world with a character they have not made: Play on a
+//! character with no saved look answers `needsLook` instead of a
+//! destination, the viewer opens the Character Creator, and its Save
+//! (`Action::SaveLook`) is the only way on from the Gate.
 
 use serde::Deserialize;
 
@@ -35,6 +40,17 @@ pub struct Character {
     /// Where it last was; absent until its first visit ends.
     #[serde(default)]
     pub last_location: Option<serde_json::Value>,
+    /// Its body and appearance from the Character Creator
+    /// (`rookery_body::look::Look`); absent until it has been made.
+    #[serde(default)]
+    pub look: Option<serde_json::Value>,
+}
+
+impl Character {
+    /// Its saved look, read (None: not made yet, or not one this viewer reads).
+    pub fn saved_look(&self) -> Option<crate::rookery_body::look::Look> {
+        self.look.clone().and_then(|v| serde_json::from_value(v).ok())
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -60,11 +76,22 @@ pub struct Destination {
     #[serde(default)]
     pub look_at: [f32; 3],
     pub ready: bool,
+    /// The region's place on the grid's map, in regions (0: not given):
+    /// the teleport goes by it, as the region's name may be a facet's.
+    #[serde(default)]
+    pub grid_x: u32,
+    #[serde(default)]
+    pub grid_y: u32,
 }
 
 impl Destination {
     pub fn position(&self) -> glam::Vec3 {
         glam::Vec3::from(self.position)
+    }
+
+    /// The region handle of its map place (None when the grid gave none).
+    pub fn handle(&self) -> Option<u64> {
+        (self.grid_x > 0 && self.grid_y > 0).then(|| (u64::from(self.grid_x) * 256) << 32 | u64::from(self.grid_y) * 256)
     }
 
     /// The facing to arrive with: the stored one, else east.
@@ -77,6 +104,7 @@ impl Destination {
 /// The grid's answer: the account and its characters, the worlds a new
 /// character can start in, and, for Play, where the character goes.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Roster {
     pub account: String,
     pub max: usize,
@@ -84,6 +112,9 @@ pub struct Roster {
     pub worlds: Vec<World>,
     #[serde(default)]
     pub destination: Option<Destination>,
+    /// Play on a character not made yet: the Character Creator opens.
+    #[serde(default)]
+    pub needs_look: bool,
 }
 
 impl Roster {
@@ -114,6 +145,8 @@ pub enum Action {
     Play { id: String },
     /// Where it would go now, and whether that region is up (while waiting).
     Destination { id: String },
+    /// Save the Character Creator's look on the character.
+    SaveLook { id: String, look: serde_json::Value },
 }
 
 /// Who is asking: a viewer in world names itself by its session and the
@@ -122,6 +155,9 @@ pub enum Action {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Auth {
     Session { session: String, secure: String },
+    // (the login screen's select, before a session exists; only the tests
+    // build one yet)
+    #[cfg_attr(not(test), allow(dead_code))]
     Password { username: String, hash: String },
 }
 
@@ -163,6 +199,11 @@ pub fn body(auth: &Auth, action: &Action) -> serde_json::Value {
         Action::Destination { id } => {
             body["action"] = "destination".into();
             body["id"] = id.as_str().into();
+        }
+        Action::SaveLook { id, look } => {
+            body["action"] = "save_look".into();
+            body["id"] = id.as_str().into();
+            body["look"] = look.clone();
         }
     }
     body
@@ -293,6 +334,36 @@ mod tests {
         assert_eq!(create["name"], "Captain Vale");
         assert_eq!(create["world"], "trek");
         assert_eq!(body(&session, &Action::Destination { id: "abc".into() })["action"], "destination");
+        let save = body(
+            &session,
+            &Action::SaveLook {
+                id: "abc".into(),
+                look: serde_json::json!({"version": 1}),
+            },
+        );
+        assert_eq!(save["action"], "save_look");
+        assert_eq!(save["look"]["version"], 1);
+    }
+
+    #[test]
+    fn a_character_not_made_yet_goes_to_the_creator() {
+        let roster = answer(
+            200,
+            br#"{"account":"a","max":3,"characters":[{"id":"a","slot":1,"name":"Ashember Love","active":true,"world":"trek"},{"id":"b","slot":2,"name":"Captain Vale","look":{"version":1,"macros":{"gender":1.0}}}],"worlds":[],"needsLook":true}"#,
+        )
+        .expect("roster");
+        assert!(roster.needs_look);
+        assert!(roster.destination.is_none());
+        assert!(roster.characters[0].saved_look().is_none());
+        let look = roster.characters[1].saved_look().expect("look");
+        assert_eq!(look.macros.gender, 1.0);
+        let place = Destination {
+            grid_x: 1069,
+            grid_y: 1002,
+            ..Default::default()
+        };
+        assert_eq!(place.handle(), Some((1069u64 * 256) << 32 | 1002 * 256));
+        assert_eq!(Destination::default().handle(), None);
     }
 
     #[test]

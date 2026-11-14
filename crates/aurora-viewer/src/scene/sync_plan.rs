@@ -322,7 +322,7 @@ impl SyncCtx<'_> {
             | GeomKey::SculptPlaceholder { lod, .. }
             | GeomKey::Mesh { lod, .. }
             | GeomKey::Tree { lod, .. } => Some(lod),
-            GeomKey::Grass { .. } | GeomKey::AvatarPart(_) | GeomKey::AvatarMorph { .. } => None,
+            GeomKey::Grass { .. } | GeomKey::AvatarPart(_) | GeomKey::AvatarMorph { .. } | GeomKey::RookeryBody { .. } => None,
         };
         Some(LodInfo {
             at: g.center,

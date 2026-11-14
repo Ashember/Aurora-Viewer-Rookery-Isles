@@ -492,7 +492,8 @@ impl App {
                                 reset = true;
                             }
                         }
-                        if ui.button(exit_label).clicked() {
+                        // (the Character Creator leaves the stage by its own Save)
+                        if self.creator.is_none() && ui.button(exit_label).clicked() {
                             self.panels.avatar_studio = false;
                         }
                     });

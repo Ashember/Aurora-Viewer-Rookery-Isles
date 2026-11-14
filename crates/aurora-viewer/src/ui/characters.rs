@@ -26,6 +26,9 @@ pub enum Choice {
     Go(Destination),
     /// Close the window and stay in the Gate.
     Close,
+    /// Open the Character Creator on this character: (id, name, its saved
+    /// look). A Play on a character not made yet comes here first.
+    EditLook(String, String, Option<crate::rookery_body::look::Look>),
 }
 
 /// A Play whose region was not ready: the character and where it was going.
@@ -82,6 +85,12 @@ impl Select {
                     }
                     if self.world.is_empty() || !roster.worlds.iter().any(|w| w.key == self.world) {
                         self.world = roster.worlds.first().map(|w| w.key.clone()).unwrap_or_default();
+                    }
+                    if roster.needs_look
+                        && let Some((id, name)) = self.playing.take()
+                    {
+                        // not made yet: the creator, and Play again once saved
+                        go = Some(Choice::EditLook(id, name, None));
                     }
                     if let Some(destination) = roster.destination.clone() {
                         let (id, name) = self
@@ -217,6 +226,24 @@ impl Select {
                                 {
                                     self.playing = Some((character.id.clone(), character.name.clone()));
                                     choice = Some(Choice::Request(Action::Play { id: character.id.clone() }));
+                                }
+                                if widgets::action_button_if(
+                                    ui,
+                                    p,
+                                    "shirt",
+                                    "",
+                                    ActionKind::Flat,
+                                    Vec2::new(34.0, 34.0),
+                                    !busy,
+                                )
+                                .on_hover_text(aurora_i18n::tr!("characters-appearance"))
+                                .clicked()
+                                {
+                                    choice = Some(Choice::EditLook(
+                                        character.id.clone(),
+                                        character.name.clone(),
+                                        character.saved_look(),
+                                    ));
                                 }
                                 if widgets::action_button_if(
                                     ui,
@@ -473,6 +500,7 @@ impl Select {
                             position: [128.0, 128.0, 30.0],
                             look_at: [1.0, 0.0, 0.0],
                             ready: true,
+                            ..Default::default()
                         }));
                     }
                 }
@@ -480,6 +508,13 @@ impl Select {
         }
         self.error_line(ui, p);
         choice
+    }
+
+    /// Play a character now (after its look was saved): its destination
+    /// comes as for a Play pressed here.
+    pub fn play(&mut self, id: String, name: String) -> Choice {
+        self.playing = Some((id.clone(), name));
+        Choice::Request(Action::Play { id })
     }
 
     /// The Wait or Go answer came: the window closes once the app has sent

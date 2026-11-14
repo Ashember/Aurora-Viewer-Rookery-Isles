@@ -268,6 +268,20 @@ impl Studio {
         }
     }
 
+    /// The camera on the face (the Character Creator's Face).
+    pub fn frame_face(&mut self) {
+        self.target_height = self.height * 0.93;
+        self.target_distance = (self.height * 0.16 / (FOV * 0.5).tan()).max(MIN_DISTANCE);
+        self.target_pan = Vec2::ZERO;
+    }
+
+    /// The camera on the whole body again (the Character Creator's Body).
+    pub fn frame_body(&mut self) {
+        self.target_height = self.height * 0.5;
+        self.target_distance = (self.height * 0.78 / (FOV * 0.5).tan()).clamp(1.5, 6.0);
+        self.target_pan = Vec2::ZERO;
+    }
+
     pub fn inspect_feet(&mut self) {
         self.target_height = 0.08;
         self.zoom(1.0);

@@ -255,7 +255,7 @@ impl JobResult {
         (area, grid_area): (f32, f32),
         pool: Option<&StagingPool>,
     ) -> Self {
-        let pick = !matches!(key, GeomKey::AvatarPart(_) | GeomKey::AvatarMorph { .. });
+        let pick = !matches!(key, GeomKey::AvatarPart(_) | GeomKey::AvatarMorph { .. } | GeomKey::RookeryBody { .. });
         JobResult::Geometry {
             key,
             geom: PreparedGeom::new(faces, min, max, pick, pool),

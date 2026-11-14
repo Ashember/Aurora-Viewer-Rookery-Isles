@@ -58,6 +58,8 @@ mod rain_ground;
 pub mod rain_sound;
 pub mod render_types;
 pub mod rez;
+/// The Rookery Isles body drawn in place of the system body (Rookery add-on).
+pub(crate) mod rookery_body;
 mod sculpt_watch;
 mod selection_demo;
 pub mod settings;
@@ -157,6 +159,11 @@ pub enum GeomKey {
     AvatarMorph {
         part: u8,
         weights: u64,
+    },
+    /// A Rookery body built from a look (scene/rookery_body.rs): its faces
+    /// are the body and the items worn; `hash` is its shape on its pack.
+    RookeryBody {
+        hash: u64,
     },
 }
 
@@ -489,6 +496,9 @@ pub struct ObjGpu {
     /// lists built by the CPU test it with (its own bounds are only as
     /// fresh as its last visit).
     pub wide: Option<(Vec3, f32)>,
+    /// Avatars drawn with a Rookery body: what their records were built
+    /// for (0: the system body). Rookery add-on.
+    pub rookery: u64,
 }
 
 impl ObjGpu {
@@ -947,6 +957,8 @@ pub struct Scene {
     retired_preview_meshes: HashSet<Uuid>,
     preview_appearances: HashMap<Uuid, blender_live::Appearance>,
     preview_images: HashMap<Uuid, blender_live::ImageSlot>,
+    /// The Rookery bodies (rookery_body.rs).
+    pub(crate) rookery: rookery_body::RookeryBodies,
     /// Objects by base texture slot of their faces, as (slot, object):
     /// faces are classified when built, and when a slot changes alpha
     /// class only the faces using it are classified again.
@@ -1644,6 +1656,7 @@ impl Scene {
             retired_preview_meshes: HashSet::new(),
             preview_appearances: HashMap::new(),
             preview_images: HashMap::new(),
+            rookery: Default::default(),
             slot_users: Default::default(),
             alpha_changes_tmp: Vec::new(),
             reslotted_tmp: Vec::new(),
@@ -1965,7 +1978,8 @@ impl Scene {
             // (built at once by `request_grass`, which needs the ground)
             GeomKey::Grass { .. } => return false,
             // (uploaded by `ensure_avatar_parts`, built by `avatar_morph`)
-            GeomKey::AvatarPart(_) | GeomKey::AvatarMorph { .. } => {}
+            // (built by their own paths: avatar.rs, morph.rs, rookery_body.rs)
+            GeomKey::AvatarPart(_) | GeomKey::AvatarMorph { .. } | GeomKey::RookeryBody { .. } => {}
         }
         self.geom_insert(key, GeomState::Pending);
         false
@@ -2403,6 +2417,8 @@ impl Scene {
         self.far_avatars.clear();
         // Blender Live's images: installed again from its snapshot
         self.preview_images.clear();
+        // the Rookery bodies and their textures: built again
+        self.rookery_gpu_lost();
         self.preview_appearances.clear();
         self.meshes.gpu_reset();
         // set again from the new renderer at the next `sync`
@@ -4495,6 +4511,16 @@ impl Scene {
         // off, filled with the muted color LLColor4::grey4)
         let jelly = self.too_complex.contains(&idx);
         let rlva_silhouette = self.rlva_silhouettes.contains(&idx);
+        // Rookery Isles: the avatar's own body from its look, when built
+        // (too complex avatars keep the grey silhouette of the system body)
+        if !jelly && self.sync_rookery_avatar(renderer, idx, o.full_id, record_model, anchor, palette) {
+            let posed = self.posed_avatar_sphere(o.full_id, palette, system_binds, avatar_model, pos);
+            let g = &mut self.gpu[idx];
+            g.center = pos;
+            g.radius = 1.2;
+            g.posed_sphere = posed;
+            return;
+        }
         let g = &self.gpu[idx];
         // (a morphed part that was being built is there, or never will be)
         let morphs_arrived = g.morph_pending && g.morph_geoms.iter().all(|k| self.geom_ready(k).is_some() || self.geom_failed(k));
@@ -4509,6 +4535,7 @@ impl Scene {
             || g.bom_mask != bom_mask
             || g.jelly != jelly
             || g.rlva_silhouette != rlva_silhouette
+            || g.rookery != 0
             || morphs_arrived;
         if needs_full {
             let mut g = std::mem::take(&mut self.gpu[idx]);
@@ -4635,6 +4662,7 @@ impl Scene {
                 self.geom_unref(k);
             }
             g.is_avatar = true;
+            g.rookery = 0;
             g.tex_generation = appearance_gen;
             g.bom_mask = bom_mask;
             g.jelly = jelly;
@@ -5452,6 +5480,8 @@ impl Scene {
         self.legacy_mats.update(net.runtime(), &net.caps_http());
         self.note_material_changes();
         let t = self.parts.lap(Part::Assets, t);
+        // (before the skin bindings go up: a body built here adds its own)
+        self.rookery_frame(renderer, net, world);
         for dirty in self.skin_binds.take_dirty() {
             renderer.set_skin_binds(self.skin_binds.list(), dirty);
         }
@@ -6139,6 +6169,8 @@ impl Scene {
                 }
             }
         }
+        // (a Rookery body's joints: the skeleton again when it changes)
+        self.rookery.skeleton_key(&owner).hash(&mut signature);
         let signature = signature.finish();
         let generation = world.appearance_generation(&owner);
         self.note_skeleton_members(owner, &members);
@@ -6188,6 +6220,10 @@ impl Scene {
             0.0
         };
         overrides.apply(&rig, &mut local_pos, &mut scale);
+        // Rookery Isles: the skeleton stands on the body its look built
+        if avatar && let Some(body) = self.rookery.joints_of(&owner) {
+            rookery_body::apply_joints(&rig, &body.joints, &mut local_pos, &mut scale);
+        }
         let (shape_dz, neutral_root_height) = if avatar {
             let (pelvis_to_foot, height) = shape::body_size(&rig, &local_pos, &scale);
             let standing = hover + overrides.pelvis_fixup() - (0.5 * height - pelvis_to_foot);

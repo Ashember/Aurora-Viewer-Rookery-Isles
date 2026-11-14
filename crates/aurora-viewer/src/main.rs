@@ -49,6 +49,7 @@ mod graphics_presets;
 mod grid_status;
 mod grids;
 mod characters;
+mod rookery_body;
 mod high_contrast;
 mod hover_tips;
 mod ik_edit;
