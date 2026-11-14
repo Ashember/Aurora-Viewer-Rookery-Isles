@@ -49,7 +49,22 @@ pub struct Character {
 impl Character {
     /// Its saved look, read (None: not made yet, or not one this viewer reads).
     pub fn saved_look(&self) -> Option<crate::rookery_body::look::Look> {
-        self.look.clone().and_then(|v| serde_json::from_value(v).ok())
+        // (was `serde_json::from_value(v).ok()` until 2026-11-14: every
+        // field of a MakeHuman look defaults, so the SL creator's marker
+        // read as the starting MakeHuman body)
+        self.look.clone().and_then(crate::rookery_body::look::Look::from_saved)
+    }
+
+    /// Its saved look when it was made in the SL Character Creator
+    /// (`sl_creator::SlLook`: its outfit folder and shape); None for one
+    /// not made yet or made in the MakeHuman creator.
+    pub fn saved_sl_look(&self) -> Option<crate::sl_creator::SlLook> {
+        self.look.as_ref().and_then(crate::sl_creator::SlLook::read)
+    }
+
+    /// Whether it has been made at all (in either creator).
+    pub fn has_look(&self) -> bool {
+        self.look.as_ref().is_some_and(|v| !v.is_null())
     }
 }
 

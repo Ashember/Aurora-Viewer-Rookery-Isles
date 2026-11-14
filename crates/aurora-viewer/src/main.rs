@@ -89,6 +89,7 @@ mod scene;
 mod screen_rate;
 mod settings;
 mod shape_editor;
+mod sl_creator;
 mod slapp;
 mod slurl;
 mod slurl_handoff;

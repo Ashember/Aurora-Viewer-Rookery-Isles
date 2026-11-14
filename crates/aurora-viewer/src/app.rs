@@ -69,6 +69,8 @@ mod admin_status;
 mod avatar_studio;
 /// The Rookery Isles Character Creator on the Avatar Studio stage.
 mod character_creator;
+/// The SL Character Creator (a Second Life avatar) on the same stage.
+mod sl_creator;
 mod contents_drop_demo;
 mod contents_folder_drag_demo;
 mod dof;
@@ -437,6 +439,11 @@ pub struct App {
     avatar_studio: crate::avatar_studio::Studio,
     /// The Rookery Isles Character Creator, open (app/character_creator.rs).
     creator: Option<crate::ui::character_creator::Creator>,
+    /// The SL Character Creator, open (app/sl_creator.rs).
+    sl_creator: Option<crate::sl_creator::Creator>,
+    /// The outfit folder of the character being played, worn as it goes
+    /// into the world (`sl_creator::play_outfit`).
+    sl_play_outfit: Option<uuid::Uuid>,
     studio_transition: crate::avatar_studio::Transition,
     studio_photo_session: Option<crate::avatar_studio::PhotoSession>,
     /// The desktop camera, and our avatar's yaw and pitch, before VR: put
@@ -1668,6 +1675,8 @@ impl App {
             camera: Camera::default(),
             avatar_studio: Default::default(),
             creator: None,
+            sl_creator: None,
+            sl_play_outfit: None,
             studio_transition: Default::default(),
             studio_photo_session: None,
             vr_camera: None,
@@ -3211,6 +3220,12 @@ impl App {
     /// character's place, or offers to wait or go elsewhere when that region
     /// is not accepting people yet.
     fn gate_select(&mut self, ctx: &egui::Context, p: &crate::theme::Palette) {
+        // offline demo (docs/TESTING.md): the SL Character Creator on a new
+        // character at frame 600, with the demo starter catalogue
+        if self.demo && std::env::var_os("AURORA_DEMO_SL_CREATOR").is_some() {
+            self.demo_sl_creator(ctx, p);
+            return;
+        }
         // offline demo (docs/TESTING.md): the Character Creator on a new
         // character at frame 600, its pack read from AURORA_ROOKERY_PACK_DIR
         if self.demo && std::env::var_os("AURORA_DEMO_ROOKERY_CREATOR").is_some() {
@@ -3270,14 +3285,23 @@ impl App {
         };
         let uri = self.settings.login_uri();
         // the Rookery body: drawn on this grid only
+        // (until 2026-11-14 on every login to it; since then only with the
+        // MakeHuman body switched on, Settings::rookery_makehuman_body:
+        // self.scene.set_rookery_grid(
+        //     crate::grids::is_rookery(&uri).then(|| crate::grids::ROOKERY_SERVICE.to_owned()),
+        // );)
         self.scene.set_rookery_grid(
-            crate::grids::is_rookery(&uri).then(|| crate::grids::ROOKERY_SERVICE.to_owned()),
+            (self.settings.rookery_makehuman_body && crate::grids::is_rookery(&uri)).then(|| crate::grids::ROOKERY_SERVICE.to_owned()),
         );
         let Some(endpoint) = crate::characters::endpoint(&uri) else {
             return;
         };
         if self.creator.is_some() {
             self.creator_frame(ctx, p, endpoint);
+            return;
+        }
+        if self.sl_creator.is_some() {
+            self.sl_creator_frame(ctx, p, endpoint);
             return;
         }
         let in_gate = self.world.region_name().eq_ignore_ascii_case(crate::grids::ROOKERY_GATE);
@@ -3290,7 +3314,17 @@ impl App {
             return;
         };
         match choice {
-            ui::characters::Choice::Request(action) => self.character_request(endpoint, action),
+            ui::characters::Choice::Request(action) => {
+                // a Play of a character made in the SL creator: its outfit
+                // folder is loaded now and worn as it goes in
+                let roster = self.login_form.characters.as_ref().and_then(|select| select.roster.as_ref());
+                self.sl_play_outfit =
+                    crate::sl_creator::play_outfit(roster, &action, self.settings.rookery_makehuman_body, self.sl_play_outfit);
+                if let Some(fetch) = self.sl_play_outfit.and_then(|outfit| crate::sl_creator::outfit_fetch(&self.world, outfit)) {
+                    self.send(fetch);
+                }
+                self.character_request(endpoint, action)
+            }
             ui::characters::Choice::LoadRegions => {
                 let Some(regions) = crate::characters::regions_endpoint(&uri) else {
                     return;
@@ -3307,6 +3341,11 @@ impl App {
             }
             ui::characters::Choice::Go(destination) => {
                 log::info!("character select: going to {} ({})", destination.region, destination.kind);
+                // the SL creator's character wears its own outfit first
+                if let Some(outfit) = self.sl_play_outfit.take() {
+                    log::info!("character select: wearing the character's outfit {outfit}");
+                    self.apply_appearance_action(crate::sl_creator::wear_outfit(outfit));
+                }
                 // by the region's map place when the grid gave it: a facet's
                 // name is not one the map search knows
                 let sent = match destination.handle() {
@@ -3323,7 +3362,15 @@ impl App {
                 }
             }
             ui::characters::Choice::Close => self.login_form.characters = None,
-            ui::characters::Choice::EditLook(id, name, look) => self.open_creator(id, name, look),
+            // the MakeHuman creator only with its body switched on; else
+            // the SL Character Creator (2026-11-14)
+            ui::characters::Choice::EditLook(id, name, look) => {
+                if self.settings.rookery_makehuman_body {
+                    self.open_creator(id, name, look);
+                } else {
+                    self.open_sl_creator_for(id, name);
+                }
+            }
         }
     }
 
@@ -3759,6 +3806,10 @@ impl App {
                 self.resource_material_copied(request, result);
                 return;
             }
+            // a starter item the SL creator copied from the Library
+            let Some(result) = self.sl_creator_copied(request, result) else {
+                return;
+            };
             self.wear_copied(request, result);
             return;
         }
@@ -3872,6 +3923,10 @@ impl App {
             }
             let blender_shape = self.blender_shape_loaded(item, asset, &result);
             let shape_xml = self.shape_xml_menu_loaded(item, asset, &result);
+            // the worn shape, skin or eyes the SL creator edits
+            if self.sl_creator_loaded(item, asset, &result) {
+                return;
+            }
             if self.wearable_ui.loaded(&mut self.world, item, asset, &result) {
                 return;
             }
@@ -3896,6 +3951,10 @@ impl App {
             return;
         }
         if let NetEvent::WearableSaved { request, result } = ev {
+            // the SL creator's copies of the shape, skin and eyes
+            let Some(result) = self.sl_creator_wearable_saved(request, result) else {
+                return;
+            };
             if self.wearable_saved(request, &result) {
                 return;
             }
@@ -5065,7 +5124,8 @@ impl App {
             && input == Input::key(winit::keyboard::KeyCode::Escape)
         {
             // the Character Creator is left by its own Save or Cancel
-            if self.creator.is_none() {
+            // (either of them, 2026-11-14)
+            if self.creator.is_none() && self.sl_creator.is_none() {
                 self.panels.avatar_studio = false;
             }
             return;
@@ -5650,7 +5710,7 @@ impl App {
         // Rookery (2026-11-14): in the Character Creator the head and eyes
         // look straight ahead; the cursor is working the sliders, not
         // something to look at
-        self.world.look_at.own_ahead = prefs.private_local || self.creator.is_some();
+        self.world.look_at.own_ahead = prefs.private_local || self.creator.is_some() || self.sl_creator.is_some();
         if self.look_at_privacy.is_some_and(|was| was != privacy) {
             if prefs.private && prefs.private_local {
                 // nothing is sent any more: the others stop showing our
@@ -9223,6 +9283,10 @@ impl App {
         images.extend(self.wearable_ui.wanted_images.drain());
         images.extend(self.day_editor.wanted_images.drain());
         images.extend(self.favorite_images.drain());
+        // the SL creator's tile pictures
+        if let Some(creator) = &mut self.sl_creator {
+            images.extend(creator.wanted_images.drain());
+        }
         let overlays = self.world.rlva_overlay_frames(Instant::now());
         self.rlva_overlay_slots.retain(|id, _| {
             let keep = overlays.iter().any(|frame| frame.texture == *id);

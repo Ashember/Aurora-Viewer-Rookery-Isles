@@ -125,6 +125,7 @@ pub mod shape;
 pub mod sheet;
 pub mod sim_console;
 pub mod skin;
+pub mod sl_creator;
 pub mod sky_beacons;
 pub mod snap;
 pub mod snapshot;

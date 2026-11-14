@@ -348,6 +348,13 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     tr!("ui-options-customize-animation-hint"),
                     &field!(customize_animation),
                 );
+                // Rookery Isles: the MakeHuman body and its creator (off:
+                // the SL Character Creator, 2026-11-14)
+                cx.toggle(
+                    tr!("slcreator-option-makehuman"),
+                    tr!("slcreator-option-makehuman-hint"),
+                    &field!(rookery_makehuman_body),
+                );
             });
         }
     }

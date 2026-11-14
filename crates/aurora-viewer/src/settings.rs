@@ -563,6 +563,12 @@ pub struct Settings {
     /// Viewer always does; Preferences › Avatars › Animations). Off, our
     /// avatar keeps its pose. Camera framing is controlled independently.
     pub customize_animation: bool,
+    /// Rookery Isles: draw the MakeHuman Rookery body and make characters in
+    /// its Character Creator (`ui::character_creator`), as the viewer did up
+    /// to 0.10.4. Off (the default since 2026-11-14), characters are
+    /// standard Second Life avatars made in the SL Character Creator
+    /// (`sl_creator`) and no MakeHuman body is drawn.
+    pub rookery_makehuman_body: bool,
     pub script_editor: crate::ui::scripts::settings::ScriptSettings,
     pub username: String,
     pub remember_username: bool,
@@ -2078,6 +2084,7 @@ impl Default for Settings {
             shape_show_hints: true,
             shape_height_feet: false,
             customize_animation: true,
+            rookery_makehuman_body: false,
             appearance_camera_movement: true,
             imports: Default::default(),
             script_editor: Default::default(),

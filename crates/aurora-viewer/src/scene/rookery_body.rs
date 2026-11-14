@@ -552,7 +552,8 @@ async fn fetch_looks(service: &str, ids: &[Uuid]) -> Result<HashMap<Uuid, Look>,
     Ok(answer
         .looks
         .into_iter()
-        .filter_map(|(id, value)| Some((id.parse::<Uuid>().ok()?, serde_json::from_value::<Look>(value).ok()?)))
+        // (an SL creator look is no MakeHuman body: `Look::from_saved`, 2026-11-14)
+        .filter_map(|(id, value)| Some((id.parse::<Uuid>().ok()?, Look::from_saved(value)?)))
         .collect())
 }
 

@@ -130,6 +130,16 @@ impl Look {
         h.finish()
     }
 
+    /// A saved look read as a MakeHuman look: None for one that names
+    /// another kind (the SL Character Creator's marker,
+    /// `sl_creator::SlLook`, 2026-11-14), which every field defaulting
+    /// would otherwise read as the starting MakeHuman body.
+    pub fn from_saved(value: serde_json::Value) -> Option<Look> {
+        if value.get("kind").is_some_and(|kind| kind.as_str() != Some("makehuman")) {
+            return None;
+        }
+        serde_json::from_value(value).ok()
+    }
 }
 
 #[cfg(test)]
