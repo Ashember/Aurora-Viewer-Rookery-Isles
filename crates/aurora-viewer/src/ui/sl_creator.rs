@@ -296,20 +296,23 @@ fn content_panel(ui: &mut egui::Ui, p: &Palette, creator: &mut Creator, images: 
     } else {
         catalogue.shelf(&shelf, sex).collect()
     };
-    let tiles: Vec<crate::sl_creator::catalogue::Item> = shown
+    let tiles: Vec<&crate::sl_creator::catalogue::Item> = shown
         .into_iter()
         .filter(|i| wanted.is_empty() || i.name.to_lowercase().contains(&wanted) || i.credit.to_lowercase().contains(&wanted))
-        .cloned()
         .collect();
     let mut clicked = None;
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        if tiles.is_empty() {
-            ui.label(RichText::new(aurora_i18n::tr!("slcreator-shelf-empty")).color(p.muted));
-        }
-        let columns = ((ui.available_width() + 6.0) / (TILE + 6.0)).floor().max(1.0) as usize;
-        for row in tiles.chunks(columns) {
+    if tiles.is_empty() {
+        ui.label(RichText::new(aurora_i18n::tr!("slcreator-shelf-empty")).color(p.muted));
+    }
+    // A shelf can hold well over a thousand items: only the rows in view are
+    // laid out, and only their pictures are asked for (2026-11-14).
+    let columns = ((ui.available_width() + 6.0) / (TILE + 6.0)).floor().max(1.0) as usize;
+    let rows: Vec<&[&crate::sl_creator::catalogue::Item]> = tiles.chunks(columns).collect();
+    let row_height = TILE + 30.0 + ui.spacing().item_spacing.y;
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, row_height, rows.len(), |ui, range| {
+        for row in &rows[range] {
             ui.horizontal(|ui| {
-                for item in row {
+                for &item in row.iter() {
                     let texture = item.thumbnail.and_then(|thumb| match images.get(&thumb) {
                         Some(texture) => Some(texture.id()),
                         None => {

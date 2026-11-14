@@ -335,7 +335,9 @@ enum Stage {
 /// The starter catalogue, as far as it came.
 pub enum CatalogueState {
     Loading(crossbeam_channel::Receiver<Result<Answer, String>>),
-    Ready(Catalogue),
+    /// Shared, so the window reads it every frame without copying several
+    /// thousand items (the Rookery starter library, 2026-11-14).
+    Ready(std::sync::Arc<Catalogue>),
     /// The grid has no starter catalogue (or this is not the Rookery grid).
     Missing,
     Failed(String),
@@ -501,7 +503,7 @@ impl Creator {
 
     /// The catalogue given directly (the offline demo's).
     pub fn set_catalogue(&mut self, catalogue: Catalogue) {
-        self.catalogue = CatalogueState::Ready(catalogue);
+        self.catalogue = CatalogueState::Ready(std::sync::Arc::new(catalogue));
     }
 
     fn poll_catalogue(&mut self) {
@@ -511,7 +513,7 @@ impl Creator {
         self.catalogue = match rx.try_recv() {
             Ok(Ok(Answer::Ready(catalogue))) => {
                 log::info!("SL creator: starter catalogue, {} items on {} shelves", catalogue.items.len(), catalogue.categories.len());
-                CatalogueState::Ready(catalogue)
+                CatalogueState::Ready(std::sync::Arc::new(catalogue))
             }
             Ok(Ok(Answer::Missing)) => {
                 log::info!("SL creator: the grid has no starter catalogue");
@@ -528,7 +530,7 @@ impl Creator {
 
     pub fn catalogue(&self) -> Option<&Catalogue> {
         match &self.catalogue {
-            CatalogueState::Ready(catalogue) => Some(catalogue),
+            CatalogueState::Ready(catalogue) => Some(catalogue.as_ref()),
             _ => None,
         }
     }
