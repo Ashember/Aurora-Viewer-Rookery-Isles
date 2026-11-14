@@ -5618,7 +5618,10 @@ impl App {
         if prefs.private_local && self.look_at_privacy.is_some_and(|(_, was)| !was) {
             self.world.look_at.own.set(lookat::CLEAR, None, glam::DVec3::ZERO, now);
         }
-        self.world.look_at.own_ahead = prefs.private_local;
+        // Rookery (2026-11-14): in the Character Creator the head and eyes
+        // look straight ahead; the cursor is working the sliders, not
+        // something to look at
+        self.world.look_at.own_ahead = prefs.private_local || self.creator.is_some();
         if self.look_at_privacy.is_some_and(|was| was != privacy) {
             if prefs.private && prefs.private_local {
                 // nothing is sent any more: the others stop showing our

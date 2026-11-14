@@ -24,8 +24,16 @@ pub struct PartMaterial {
     pub texture: Option<String>,
     pub color: [f32; 3],
     pub blend: bool,
+    /// Cut out where the texture's alpha is under `cutoff` (hair cards,
+    /// the eyes' clear cornea, lace), drawn with depth like a solid part,
+    /// so overlapping layers never sort wrong. 2026-11-14.
+    pub mask: bool,
+    pub cutoff: f32,
     pub two_sided: bool,
 }
+
+/// The cutoff of a masked part whose pack gives none.
+pub const DEFAULT_CUTOFF: f32 = 0.5;
 
 /// One drawable face (at most 65,535 vertices).
 pub struct BuiltPart {
@@ -298,6 +306,8 @@ pub fn material_of(pack: &Pack, look: &Look, item: &str) -> PartMaterial {
             texture,
             color,
             blend: false,
+            mask: false,
+            cutoff: DEFAULT_CUTOFF,
             two_sided: false,
         };
     }
@@ -306,6 +316,8 @@ pub fn material_of(pack: &Pack, look: &Look, item: &str) -> PartMaterial {
             texture: None,
             color: super::look::WHITE,
             blend: false,
+            mask: false,
+            cutoff: DEFAULT_CUTOFF,
             two_sided: false,
         };
     };
@@ -319,6 +331,8 @@ pub fn material_of(pack: &Pack, look: &Look, item: &str) -> PartMaterial {
         texture,
         color,
         blend: proxy.material.alpha == "BLEND",
+        mask: proxy.material.alpha == "MASK" || proxy.material.mask_cutoff.is_some(),
+        cutoff: proxy.material.mask_cutoff.unwrap_or(DEFAULT_CUTOFF),
         two_sided: proxy.material.two_sided || proxy.kind != "eyes",
     }
 }

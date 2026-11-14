@@ -926,7 +926,7 @@ impl Scene {
             palette.hash(&mut h);
             for (m, s) in materials.iter().zip(&slots) {
                 m.color.map(f32::to_bits).hash(&mut h);
-                (m.blend, m.two_sided).hash(&mut h);
+                (m.blend, m.mask, m.cutoff.to_bits(), m.two_sided).hash(&mut h);
                 s.map(|(_, slot)| slot).hash(&mut h);
             }
             h.finish() | 1
@@ -954,9 +954,12 @@ impl Scene {
             let proxy = pack.content.proxy(item);
             let kind = proxy.map_or("body", |p| p.kind.as_str());
             let slot = slots.get(fi).copied().flatten();
+            // a masked part is cut out at its own cutoff, every other part
+            // at the avatar's minimum alpha, as before
+            let cutoff = if material.mask { material.cutoff } else { AVATAR_MINIMUM_ALPHA };
             let mut rec = DrawRecord {
                 model: record_model,
-                params: [0.0, 0.0, 0.8, AVATAR_MINIMUM_ALPHA],
+                params: [0.0, 0.0, 0.8, cutoff],
                 flags: [flags::SKINNED, palette, binds, 0],
                 base_color: [material.color[0], material.color[1], material.color[2], 1.0],
                 ..Default::default()
@@ -970,6 +973,7 @@ impl Scene {
             let record = renderer.records.alloc(rec);
             let pbr_alpha = match kind {
                 "body" => None,
+                _ if material.mask => Some(2),
                 _ if material.blend => Some(1),
                 _ => Some(0),
             };

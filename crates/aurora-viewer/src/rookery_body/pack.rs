@@ -59,6 +59,10 @@ pub struct Material {
     pub alpha: String,
     #[serde(default)]
     pub two_sided: bool,
+    /// A cut out item: the alpha under which its texture is cut out. Its
+    /// `alpha` still says "BLEND" for viewers before 0.10.4.
+    #[serde(default)]
+    pub mask_cutoff: Option<f32>,
 }
 
 /// A worn item: eyes, eyebrows, eyelashes, hair, clothes.

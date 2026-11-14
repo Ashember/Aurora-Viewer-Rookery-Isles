@@ -12,6 +12,13 @@ use std::time::Duration;
 // releases, never upstream Aurora's, so an update never replaces this build
 // with an unbranded one.
 pub const RELEASES: &str = "https://api.github.com/repos/Ashember/Aurora-Viewer-Rookery-Isles/releases?per_page=100";
+/// The Rookery Isles website's own release list (rookeryisles.com
+/// lib/viewer_feed.php), in GitHub's shape: read first, so a release is out
+/// the moment it is published there. GitHub's list (`RELEASES`) answers
+/// when the website cannot. 2026-11-14.
+pub const ROOKERY_RELEASES: &str = "https://rookeryisles.com/viewer/releases";
+/// The website's host, trusted for the list, its release page and files.
+const ROOKERY_HOST: &str = "rookeryisles.com";
 pub const RELEASE_PAGE: &str = "https://github.com/Ashember/Aurora-Viewer-Rookery-Isles/releases";
 const DOWNLOADS: &str = "https://github.com/Ashember/Aurora-Viewer-Rookery-Isles/releases/download";
 pub const POLICY: &str = "aurora-update-policy.json";
@@ -53,6 +60,8 @@ pub fn is_beta(v: &Version) -> bool {
 #[derive(Clone)]
 pub struct Source {
     url: String,
+    /// The list read when `url` cannot be (GitHub's, behind the website's).
+    fallback: Option<String>,
     loopback: bool,
     /// The release list last read and its ETag, shared by the clones: the
     /// next check asks GitHub whether it changed (`If-None-Match`). A "304
@@ -60,13 +69,15 @@ pub struct Source {
     /// requests an hour GitHub allows an address without an account, so a
     /// viewer can check every few minutes, even with others behind the same
     /// address (a household, a mobile network, a VPN).
-    list: std::sync::Arc<std::sync::Mutex<Option<(String, Vec<u8>)>>>,
+    /// Kept per list address (the website's and GitHub's).
+    list: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, (String, Vec<u8>)>>>,
 }
 
 impl Default for Source {
     fn default() -> Self {
         Self {
-            url: RELEASES.into(),
+            url: ROOKERY_RELEASES.into(),
+            fallback: Some(RELEASES.into()),
             loopback: false,
             list: Default::default(),
         }
@@ -84,6 +95,7 @@ impl Source {
         ensure!(url.username().is_empty() && url.password().is_none(), "credentials in feed URL");
         Ok(Self {
             url: url.into(),
+            fallback: None,
             loopback: true,
             list: Default::default(),
         })
@@ -100,7 +112,13 @@ impl Source {
                 url.scheme() == "https"
                     && matches!(
                         url.host_str(),
-                        Some("api.github.com" | "github.com" | "release-assets.githubusercontent.com" | "objects.githubusercontent.com")
+                        Some(
+                            ROOKERY_HOST
+                                | "api.github.com"
+                                | "github.com"
+                                | "release-assets.githubusercontent.com"
+                                | "objects.githubusercontent.com"
+                        )
                     ),
                 "untrusted update URL"
             );
@@ -156,13 +174,32 @@ impl Source {
         Ok(bytes)
     }
 
-    /// The release list: the one kept when GitHub says it has not changed
-    /// since (`list`), else the new one, kept with its ETag.
-    async fn releases(&self, client: &Client) -> Result<Vec<u8>> {
+    /// The release list: the website's, or GitHub's when the website cannot
+    /// answer (or answers something that is not a list).
+    async fn releases(&self, client: &Client) -> Result<Vec<GithubRelease>> {
+        let first = async { Ok::<_, anyhow::Error>(serde_json::from_slice(&self.list_at(client, &self.url).await?)?) }.await;
+        match (first, &self.fallback) {
+            (Ok(list), _) => Ok(list),
+            (Err(error), Some(fallback)) => {
+                log::warn!("release list {}: {error:#}; asking {fallback}", self.url);
+                Ok(serde_json::from_slice(&self.list_at(client, fallback).await?)?)
+            }
+            (Err(error), None) => Err(error),
+        }
+    }
+
+    /// One list: the one kept when its host says it has not changed since
+    /// (`list`), else the new one, kept with its ETag.
+    async fn list_at(&self, client: &Client, url: &str) -> Result<Vec<u8>> {
         const LIMIT: usize = 4 * 1024 * 1024;
-        self.validate_url(&self.url)?;
-        let kept = self.list.lock().map_err(|_| anyhow::anyhow!("release list lock"))?.clone();
-        let mut request = client.get(&self.url).header("Accept", "application/vnd.github+json");
+        self.validate_url(url)?;
+        let kept = self
+            .list
+            .lock()
+            .map_err(|_| anyhow::anyhow!("release list lock"))?
+            .get(url)
+            .cloned();
+        let mut request = client.get(url).header("Accept", "application/vnd.github+json");
         if let Some((etag, _)) = &kept {
             request = request.header(reqwest::header::IF_NONE_MATCH, etag);
         }
@@ -184,14 +221,21 @@ impl Source {
             bytes.extend_from_slice(&chunk);
         }
         if let Ok(mut list) = self.list.lock() {
-            *list = etag.map(|e| (e, bytes.clone()));
+            match etag {
+                Some(e) => {
+                    list.insert(url.to_owned(), (e, bytes.clone()));
+                }
+                None => {
+                    list.remove(url);
+                }
+            }
         }
         Ok(bytes)
     }
 
     pub async fn check(&self, current: &str, channel: Channel) -> Result<Option<Release>> {
         let client = self.client()?;
-        let releases: Vec<GithubRelease> = serde_json::from_slice(&self.releases(&client).await?)?;
+        let releases = self.releases(&client).await?;
         let Some((v, r)) = releases
             .into_iter()
             .filter_map(|r| {
@@ -373,7 +417,19 @@ mod tests {
                 .validate_url("https://github.com/Ashember/Aurora-Viewer-Rookery-Isles/releases")
                 .is_ok()
         );
+        // the website's own list and files come first (2026-11-14)
+        assert_eq!(production.url, ROOKERY_RELEASES);
+        assert_eq!(production.fallback.as_deref(), Some(RELEASES));
+        assert!(production.validate_url(ROOKERY_RELEASES).is_ok());
+        assert!(
+            production
+                .validate_url("https://rookeryisles.com/viewer/files/v0.10.4/Rookery-Isles-Viewer-v0.10.4-windows-x64.zip")
+                .is_ok()
+        );
         for url in [
+            "http://rookeryisles.com/viewer/releases",
+            "https://rookeryisles.com.example.org/viewer/releases",
+            "https://evil.rookeryisles.com/viewer/releases",
             "http://github.com/a",
             "https://example.org/a",
             "https://name:password@github.com/a",
