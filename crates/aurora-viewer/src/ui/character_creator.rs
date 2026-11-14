@@ -35,6 +35,8 @@ const TILE: f32 = 88.0;
 const THUMBS_AT_ONCE: usize = 8;
 /// Steps kept for undo.
 const UNDO_STEPS: usize = 100;
+/// Clothes shelves whose items are worn together rather than one at a time.
+const STACKING: [&str; 5] = ["Jewelry", "Accessories", "Facial hair", "Carried", "Other"];
 
 /// The shelves of the content browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -327,6 +329,8 @@ pub struct Creator {
     shelf: Shelf,
     clothes_category: String,
     search: String,
+    /// Narrows the content browser's tiles by name.
+    content_search: String,
     symmetric: bool,
     groups: Option<Vec<SliderGroup>>,
     thumbs: Thumbs,
@@ -357,6 +361,7 @@ impl Creator {
             shelf: Shelf::Skin,
             clothes_category: String::new(),
             search: String::new(),
+            content_search: String::new(),
             symmetric: true,
             groups: None,
             thumbs: Thumbs::default(),
@@ -761,6 +766,12 @@ impl Creator {
             }
         }
         widgets::divider(ui, p);
+        ui.add(
+            egui::TextEdit::singleline(&mut self.content_search)
+                .hint_text(aurora_i18n::tr!("creator-content-search"))
+                .desired_width(f32::INFINITY),
+        );
+        let wanted = self.content_search.trim().to_lowercase();
         let ctx = ui.ctx().clone();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let columns = ((ui.available_width() + 6.0) / (TILE + 6.0)).floor().max(1.0) as usize;
@@ -809,6 +820,10 @@ impl Creator {
                     }
                 }
             }
+            // the search: the tiles whose name has it (the "none" tile stays)
+            if !wanted.is_empty() {
+                tiles.retain(|(id, name, _, _)| id.is_none() || name.to_lowercase().contains(&wanted));
+            }
             let mut clicked: Option<Option<String>> = None;
             for row in tiles.chunks(columns) {
                 ui.horizontal(|ui| {
@@ -852,10 +867,14 @@ impl Creator {
                     return;
                 }
                 // one garment of a kind: a new shirt replaces the shirt
+                // (jewelry, accessories, facial hair and what is carried are
+                // worn together)
                 let category = pack.content.proxy(&id).map(|c| c.category.clone()).unwrap_or_default();
-                self.look
-                    .clothes
-                    .retain(|c| pack.content.proxy(c).is_none_or(|worn| worn.category != category));
+                if !STACKING.contains(&category.as_str()) {
+                    self.look
+                        .clothes
+                        .retain(|c| pack.content.proxy(c).is_none_or(|worn| worn.category != category));
+                }
                 self.look.clothes.push(id);
                 // layered as MakeHuman layers them: under the ones above
                 self.look
