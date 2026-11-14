@@ -329,6 +329,65 @@ fn the_catalogue_reads_tolerantly() {
     assert_eq!(demo.body_items(Sex::Male).len(), 1);
 }
 
+/// The grid's own answer (grid internal/inventory/starter.go, 2026-11-14):
+/// `itemId`, `inventoryType`, wearable types by name, keyed categories, and
+/// `defaultFor` from its starter defaults file. A body shelf holds variants
+/// that overlap when worn together, so only the defaults are the body.
+#[test]
+fn the_grid_s_catalogue_picks_each_body_s_starter_set() {
+    let catalogue = Catalogue::parse(
+        br#"{
+            "version": "1a2b", "rootFolderId": "00000000-0000-4000-8000-000000000100",
+            "categories": [
+                {"key": "bodies", "name": "Bodies", "folderId": "65e83604-0659-8d69-afb1-0d069b9e5fcb", "count": 4},
+                {"key": "shapes", "name": "Shapes", "count": 2},
+                {"key": "skins", "name": "Skins", "count": 2},
+                {"key": "eyes", "name": "Eyes", "count": 1},
+                {"key": "hair", "name": "Hair", "count": 2}
+            ],
+            "items": [
+                {"itemId": "a0000000-0000-4000-8000-000000000001", "name": "Ruth2 v4 (Body+Hands+Head)", "assetType": 6, "inventoryType": 6, "category": "bodies", "sex": "female", "attachmentPoint": 40, "defaultFor": ["female"]},
+                {"itemId": "a0000000-0000-4000-8000-000000000002", "name": "Ruth2 v4 Headless (Body+Hands)", "assetType": 6, "inventoryType": 6, "category": "bodies", "sex": "female", "attachmentPoint": 40},
+                {"itemId": "a0000000-0000-4000-8000-000000000003", "name": "Roth2 v2 Full (Body+Feet+Hands+Head)", "assetType": 6, "inventoryType": 6, "category": "bodies", "sex": "male", "attachmentPoint": 40, "defaultFor": ["male"]},
+                {"itemId": "a0000000-0000-4000-8000-000000000004", "name": "Roth2 v2 Head", "assetType": 6, "inventoryType": 6, "category": "bodies", "sex": "male", "attachmentPoint": 2},
+                {"itemId": "a0000000-0000-4000-8000-000000000005", "name": "Ruth2 v4 Basic Shape", "assetType": 13, "inventoryType": 18, "category": "shapes", "sex": "female", "wearableType": "shape", "defaultFor": ["female"]},
+                {"itemId": "a0000000-0000-4000-8000-000000000006", "name": "Roth2 v2 Shape Default", "assetType": 13, "inventoryType": 18, "category": "shapes", "sex": "male", "wearableType": "shape", "defaultFor": ["male"]},
+                {"itemId": "a0000000-0000-4000-8000-000000000007", "name": "Starlight Medium", "assetType": 13, "inventoryType": 18, "category": "skins", "sex": "female", "wearableType": "skin", "defaultFor": ["female"], "thumbnailAssetId": "b0000000-0000-4000-8000-000000000007"},
+                {"itemId": "a0000000-0000-4000-8000-000000000008", "name": "Lf0y Medium", "assetType": 13, "inventoryType": 18, "category": "skins", "sex": "male", "wearableType": "skin", "defaultFor": ["male"]},
+                {"itemId": "a0000000-0000-4000-8000-000000000009", "name": "Ruth2 v4 EyeBalls", "assetType": 6, "inventoryType": 6, "category": "eyes", "sex": "any", "attachmentPoint": 16, "defaultFor": ["female"]},
+                {"itemId": "a0000000-0000-4000-8000-00000000000a", "name": "Biker Hair Light", "assetType": 6, "inventoryType": 6, "category": "hair", "sex": "any", "attachmentPoint": 11, "defaultFor": ["female"]},
+                {"itemId": "a0000000-0000-4000-8000-00000000000b", "name": "Biker Hair Dark", "assetType": 6, "inventoryType": 6, "category": "hair", "sex": "any", "attachmentPoint": 11, "defaultFor": ["male", "elf"]}
+            ]
+        }"#,
+    )
+    .expect("the grid's catalogue");
+    let item = |n: u128| catalogue.item(Uuid::from_u128(0xa000_0000_0000_4000_8000_0000_0000_0000 + n)).expect("item");
+    assert!(catalogue.category("bodies").is_some_and(|c| c.body), "the grid's Bodies shelf is the body");
+    assert_eq!((item(5).inv_type, item(5).wearable_type), (18, Some(0)), "inventoryType and a wearable type by name");
+    assert_eq!(item(7).wearable_type, Some(1));
+    assert_eq!(item(7).thumbnail, Some(Uuid::from_u128(0xb000_0000_0000_4000_8000_0000_0000_0007)));
+    assert_eq!(item(11).default_for, vec![Sex::Male], "an unknown body word is left out");
+    let names = |items: Vec<&Item>| items.iter().map(|i| i.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(catalogue.body_items(Sex::Female)), ["Ruth2 v4 (Body+Hands+Head)"], "the defaults, not every variant");
+    assert_eq!(names(catalogue.body_items(Sex::Male)), ["Roth2 v2 Full (Body+Feet+Hands+Head)"]);
+    assert_eq!(
+        names(catalogue.defaults(Sex::Female)),
+        ["Ruth2 v4 (Body+Hands+Head)", "Ruth2 v4 Basic Shape", "Starlight Medium", "Ruth2 v4 EyeBalls", "Biker Hair Light"],
+        "an item for both bodies is a default only for the body it names"
+    );
+    assert_eq!(
+        names(catalogue.defaults(Sex::Male)),
+        ["Roth2 v2 Full (Body+Feet+Hands+Head)", "Roth2 v2 Shape Default", "Lf0y Medium", "Biker Hair Dark"]
+    );
+    // without any defaults marked, a body shelf still gives a body
+    let unmarked = Catalogue::parse(
+        br#"{"categories": [{"key": "bodies", "name": "Bodies"}],
+             "items": [{"itemId": "a0000000-0000-4000-8000-000000000001", "name": "Body", "category": "bodies", "sex": "female"}]}"#,
+    )
+    .expect("unmarked");
+    assert_eq!(unmarked.body_items(Sex::Female).len(), 1);
+}
+
 #[test]
 fn save_copies_the_shape_saves_the_outfit_then_the_look() {
     let (mut world, mut creator) = fixture();

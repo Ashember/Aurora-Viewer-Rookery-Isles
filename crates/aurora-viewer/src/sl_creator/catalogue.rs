@@ -87,6 +87,33 @@ pub struct Item {
     pub add: bool,
     /// Worn on a new character before anything is chosen.
     pub default: bool,
+    /// The bodies whose new characters wear it first (the grid's
+    /// `defaultFor`, from its starter defaults file). 2026-11-14.
+    pub default_for: Vec<Sex>,
+}
+
+impl Item {
+    /// Whether a new character with this body wears it first.
+    pub fn default_for_body(&self, body: Sex) -> bool {
+        self.default_for.contains(&body) || (self.default && self.sex.fits(body))
+    }
+}
+
+/// A wearable type by its number or by the grid's name for it
+/// (LLWearableType: "shape" 0, "skin" 1, ... "universal" 16).
+fn wearable_type_of(value: &Value) -> Option<u8> {
+    const NAMES: [&str; 17] = [
+        "shape", "skin", "hair", "eyes", "shirt", "pants", "shoes", "socks", "jacket", "gloves", "undershirt",
+        "underpants", "skirt", "alpha", "tattoo", "physics", "universal",
+    ];
+    let field = value.get("wearableType").or_else(|| value.get("wearable_type"))?;
+    if let Some(n) = field.as_u64() {
+        return u8::try_from(n).ok();
+    }
+    let word = field.as_str()?.trim().to_ascii_lowercase();
+    word.parse::<u8>()
+        .ok()
+        .or_else(|| NAMES.iter().position(|name| *name == word).and_then(|i| u8::try_from(i).ok()))
 }
 
 /// The whole catalogue, categories in the grid's order.
@@ -169,14 +196,23 @@ fn item_of(value: &Value) -> Option<Item> {
         id,
         name: text(value, &["name", "title"]).unwrap_or_default(),
         asset_type: number(value, &["assetType", "asset_type"]).and_then(|n| i32::try_from(n).ok()).unwrap_or(-1),
-        inv_type: number(value, &["invType", "inv_type"]).and_then(|n| i32::try_from(n).ok()).unwrap_or(-1),
+        inv_type: number(value, &["invType", "inventoryType", "inv_type"]).and_then(|n| i32::try_from(n).ok()).unwrap_or(-1),
         category: text(value, &["category", "categoryId", "shelf"]).unwrap_or_default(),
         sex: text(value, &["sex", "gender", "body"]).map_or(Sex::Any, |s| Sex::parse(&s)),
-        wearable_type: number(value, &["wearableType", "wearable_type"]).and_then(|n| u8::try_from(n).ok()),
-        thumbnail: uuid(value, &["thumbnail", "thumbnailId", "image"]),
+        wearable_type: wearable_type_of(value),
+        thumbnail: uuid(value, &["thumbnail", "thumbnailAssetId", "thumbnailId", "image"]),
         credit,
         add: flag(value, "add").unwrap_or(false),
         default: flag(value, "default").unwrap_or(false),
+        default_for: value
+            .get("defaultFor")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(Sex::parse)
+            .filter(|sex| *sex != Sex::Any)
+            .collect(),
     })
 }
 
@@ -240,20 +276,26 @@ impl Catalogue {
         self.items.iter().filter(move |i| i.category == category && i.sex.fits(body))
     }
 
-    /// The starter body items for a body (female: Ruth2, male: Roth2), by
-    /// their shelves and their sex: what switching to that body wears.
+    /// The starter body items for a body (female: Ruth2, male: Roth2): the
+    /// body shelf's items of that sex marked as its defaults, or, when the
+    /// grid marks none, every body shelf item of that sex. (A body shelf
+    /// holds whole-body, headless and piece variants, feet heights and nail
+    /// styles: worn all at once they overlap, so the defaults pick.)
     pub fn body_items(&self, body: Sex) -> Vec<&Item> {
-        self.items
+        let shelf: Vec<&Item> = self
+            .items
             .iter()
             .filter(|i| i.sex == body && self.category(&i.category).is_some_and(|c| c.body))
-            .collect()
+            .collect();
+        let marked: Vec<&Item> = shelf.iter().copied().filter(|i| i.default_for_body(body)).collect();
+        if marked.is_empty() { shelf } else { marked }
     }
 
     /// What a new character wears before anything is chosen: the body for
-    /// its sex, then the items marked `default` that fit it.
+    /// its sex, then every other item that is a default for it.
     pub fn defaults(&self, body: Sex) -> Vec<&Item> {
         let mut out = self.body_items(body);
-        for item in self.items.iter().filter(|i| i.default && i.sex.fits(body)) {
+        for item in self.items.iter().filter(|i| i.default_for_body(body)) {
             if !out.iter().any(|o| o.id == item.id) {
                 out.push(item);
             }

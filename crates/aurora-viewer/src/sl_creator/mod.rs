@@ -892,25 +892,56 @@ impl Creator {
         self.before = Some(self.edits());
     }
 
-    /// The worn starter body of `old` taken off, that of `new` put on (added,
-    /// so what else is worn at its points, hair on the skull, stays).
+    /// The starter set of `old` taken off, that of `new` put on: its body
+    /// pieces (added, so what else is worn at their points, hair on the
+    /// skull, stays), and its other defaults (skin, eyes, alpha, underwear,
+    /// hair) worn in place of the old body's. The shape is never swapped:
+    /// it holds the sliders being edited, and the male param already
+    /// followed the switch. Body parts are never taken off (a body part can
+    /// only be replaced); the new body's own replace them. 2026-11-14: was
+    /// the body shelf's items only, so the old body's skin, mesh eyes and
+    /// underwear stayed on the new body.
     fn swap_body(&mut self, old: Sex, new: Sex) {
         let Some(catalogue) = self.catalogue() else {
             return;
         };
-        let off: Vec<Uuid> = catalogue.body_items(old).iter().map(|i| i.id).collect();
-        let on: Vec<(Uuid, String)> = catalogue.body_items(new).iter().map(|i| (i.id, i.category.clone())).collect();
+        let is_shape = |i: &Item| i.wearable_type == Some(0);
+        let leaving = catalogue.defaults(old);
+        let arriving = catalogue.defaults(new);
+        let off: Vec<Uuid> = leaving
+            .iter()
+            .filter(|i| !is_shape(i) && i.asset_type != 13 && !arriving.iter().any(|a| a.id == i.id))
+            .map(|i| i.id)
+            .collect();
+        let on: Vec<(Uuid, String, bool)> = arriving
+            .iter()
+            .filter(|i| !is_shape(i) && !leaving.iter().any(|l| l.id == i.id))
+            .map(|i| {
+                let body = catalogue.category(&i.category).is_some_and(|c| c.body);
+                (i.id, i.category.clone(), !body && catalogue.replaces(i))
+            })
+            .collect();
         for item in off {
             self.queue.push_back(Job::Remove { item });
         }
-        for (item, category) in on {
+        for (item, category, replace) in on {
             self.chosen.insert(category, item);
             self.queue.push_back(Job::Wear {
                 item,
-                replace: false,
+                replace,
                 catalogue: Some(item),
             });
         }
+        // The body shelf's items only, until 2026-11-14:
+        // let off: Vec<Uuid> = catalogue.body_items(old).iter().map(|i| i.id).collect();
+        // let on: Vec<(Uuid, String)> = catalogue.body_items(new).iter().map(|i| (i.id, i.category.clone())).collect();
+        // for item in off {
+        //     self.queue.push_back(Job::Remove { item });
+        // }
+        // for (item, category) in on {
+        //     self.chosen.insert(category, item);
+        //     self.queue.push_back(Job::Wear { item, replace: false, catalogue: Some(item) });
+        // }
     }
 
     // ---- the content browser ------------------------------------------
