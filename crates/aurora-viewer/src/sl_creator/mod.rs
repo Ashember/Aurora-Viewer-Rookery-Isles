@@ -284,6 +284,10 @@ pub fn saved_of(roster: Option<&crate::characters::Roster>, id: &str) -> (Option
 /// heavier, a bigger head, shorter legs): plainly another body.
 pub const DEMO_SHAPED: [(i32, f32); 6] = [(33, 1.6), (34, 1.4), (36, 1.4), (637, 1.0), (682, 1.0), (692, -0.8)];
 
+/// The skin colour the offline demo's `skin` mode gives (Rainbow Color
+/// full, Pigment full): plainly another skin, composed onto the body.
+pub const DEMO_SKIN: [(Part, i32, f32); 2] = [(Part::Skin, 108, 1.0), (Part::Skin, 111, 1.0)];
+
 /// The wear of a played character's outfit, as it goes into the world.
 pub fn wear_outfit(outfit: Uuid) -> crate::world::appearance::Action {
     crate::world::appearance::Action::WearOutfits {
@@ -394,6 +398,9 @@ pub struct Creator {
     before: Option<Edits>,
     /// The values last drawn on the avatar.
     previewed: Option<Edits>,
+    /// The skin or eyes changed since the body's bakes were last composed
+    /// (`take_bakes_stale`).
+    bakes_stale: bool,
     pub symmetric: bool,
     /// The body worn: female (Ruth2) or male (Roth2).
     pub sex: Sex,
@@ -465,6 +472,7 @@ impl Creator {
             editing: false,
             before: None,
             previewed: None,
+            bakes_stale: true,
             symmetric: true,
             sex: Sex::Female,
             queue: VecDeque::new(),
@@ -752,6 +760,14 @@ impl Creator {
         if self.previewed.as_ref() == Some(edits) {
             return;
         }
+        // the skin's and eyes' values are drawn by composing the body's bakes
+        if self
+            .previewed
+            .as_ref()
+            .is_none_or(|before| before.0[Part::Skin.index()] != edits.0[Part::Skin.index()] || before.0[Part::Eyes.index()] != edits.0[Part::Eyes.index()])
+        {
+            self.bakes_stale = true;
+        }
         self.previewed = Some(edits.clone());
         if self.drafts.iter().all(Option::is_none) {
             world.preview_shape(None);
@@ -762,6 +778,23 @@ impl Creator {
             .shape_params
             .edit_values(world.server_visual_params(), &self.preview_params(edits));
         world.preview_shape(Some(values));
+    }
+
+    /// The drafts the body's bakes are composed with on this machine (the
+    /// skin and the eyes, as worn or as edited), the way the appearance
+    /// editor shows the wearable it edits: a skin worn or recoloured shows
+    /// on the body at once, not after its bake went to the region and back.
+    pub fn bake_drafts(&self) -> Vec<&Draft> {
+        [Part::Skin, Part::Eyes]
+            .into_iter()
+            .filter_map(|part| self.drafts[part.index()].as_ref())
+            .collect()
+    }
+
+    /// Whether the skin or eyes changed since the last call: the body's
+    /// bakes are composed again.
+    pub fn take_bakes_stale(&mut self) -> bool {
+        std::mem::take(&mut self.bakes_stale)
     }
 
     /// The params the avatar is drawn with: the whole shape draft, and only
@@ -923,6 +956,20 @@ impl Creator {
                 (i.id, i.category.clone(), !body && catalogue.replaces(i))
             })
             .collect();
+        // rigged garments are fitted to one body: those chosen for the old
+        // body come off with what they brought (2026-11-15)
+        let garments: Vec<Item> = self
+            .chosen
+            .iter()
+            .filter(|(category, _)| catalogue.category(category).is_some_and(|c| c.garment))
+            .filter_map(|(_, id)| catalogue.item(*id))
+            .filter(|item| !item.sex.fits(new))
+            .cloned()
+            .collect();
+        for garment in &garments {
+            self.chosen.remove(&garment.category);
+            self.take_off_with(garment);
+        }
         for item in off {
             self.queue.push_back(Job::Remove { item });
         }
@@ -966,6 +1013,11 @@ impl Creator {
         if !entry.sex.fits(self.sex) {
             return;
         }
+        if catalogue.category(&entry.category).is_some_and(|c| c.garment) {
+            let previous = self.chosen.get(&entry.category).and_then(|id| catalogue.item(*id)).cloned();
+            self.choose_garment(entry, replace, previous);
+            return;
+        }
         if !replace || body {
             // a stacking item toggles; a body piece is added
             if self.chosen.get(&entry.category) == Some(&item) && !body {
@@ -980,6 +1032,39 @@ impl Creator {
             replace: replace && !body,
             catalogue: Some(item),
         });
+    }
+
+    /// A rigged mesh garment chosen (2026-11-15). It is added to what is
+    /// worn, never sent to replace what is on its attachment point: the
+    /// starter bodies wear their own pieces on points, and a replace would
+    /// knock a foot or a head off. What it takes the place of comes off by
+    /// name instead: on a replacing shelf the garment chosen there before,
+    /// with the items it brought. Its own `with` items (its alpha cut) go on
+    /// with it. The garment already chosen comes off again when clicked.
+    fn choose_garment(&mut self, entry: Item, replace: bool, previous: Option<Item>) {
+        if self.chosen.get(&entry.category) == Some(&entry.id) {
+            self.chosen.remove(&entry.category);
+            self.take_off_with(&entry);
+            return;
+        }
+        if replace && let Some(previous) = previous {
+            self.take_off_with(&previous);
+        }
+        self.chosen.insert(entry.category.clone(), entry.id);
+        for item in std::iter::once(entry.id).chain(entry.with.iter().copied()) {
+            self.queue.push_back(Job::Wear {
+                item,
+                replace: false,
+                catalogue: Some(item),
+            });
+        }
+    }
+
+    /// Takes a catalogue item off, with the items it brought.
+    fn take_off_with(&mut self, entry: &Item) {
+        for item in std::iter::once(entry.id).chain(entry.with.iter().copied()) {
+            self.queue.push_back(Job::Remove { item });
+        }
     }
 
     /// Whether a tile shows as chosen.
@@ -1057,6 +1142,16 @@ impl Creator {
                         self.message = aurora_i18n::tr!("slcreator-library-unknown").to_owned();
                         continue;
                     }
+                    // the copy goes into the system folder of its type (Objects
+                    // for mesh hair, bodies and attachments): 2026-11-14 the
+                    // grid placed only textures, clothes and body parts by
+                    // itself and refused every object copy without a folder,
+                    // so no mesh hair could be worn
+                    let parent = inv
+                        .items
+                        .get(&item)
+                        .and_then(|it| crate::world::appearance::system_folder(inv, i32::from(it.asset_type)))
+                        .unwrap_or(Uuid::nil());
                     let request = Uuid::new_v4();
                     self.copies.insert(request, (catalogue.unwrap_or(item), replace));
                     self.touched = true;
@@ -1065,7 +1160,7 @@ impl Creator {
                         copy: aurora_net::inventory::operations::CopyItem {
                             item,
                             owner,
-                            parent: Uuid::nil(),
+                            parent,
                             name: String::new(),
                         },
                     }));

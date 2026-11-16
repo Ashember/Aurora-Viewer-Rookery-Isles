@@ -441,6 +441,10 @@ pub struct App {
     creator: Option<crate::ui::character_creator::Creator>,
     /// The SL Character Creator, open (app/sl_creator.rs).
     sl_creator: Option<crate::sl_creator::Creator>,
+    /// The SL Character Creator's skin and eyes composed onto the body on
+    /// this machine, as the appearance editor shows its edit (kept with the
+    /// app, so its GPU textures are freed after the creator closes).
+    sl_creator_bakes: crate::wearable_editor::preview::Preview,
     /// The outfit folder of the character being played, worn as it goes
     /// into the world (`sl_creator::play_outfit`).
     sl_play_outfit: Option<uuid::Uuid>,
@@ -1676,6 +1680,7 @@ impl App {
             avatar_studio: Default::default(),
             creator: None,
             sl_creator: None,
+            sl_creator_bakes: Default::default(),
             sl_play_outfit: None,
             studio_transition: Default::default(),
             studio_photo_session: None,
@@ -10443,6 +10448,7 @@ impl App {
         }
         self.apply_local_imports(&mut gfx.renderer);
         self.wearable_ui.preview.apply(&mut self.world, &mut self.scene, &mut gfx.renderer);
+        self.sl_creator_bakes.apply(&mut self.world, &mut self.scene, &mut gfx.renderer);
         for command in self.local_bakes.update(&self.world, &mut self.scene) {
             self.send(command);
         }

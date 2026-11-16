@@ -114,8 +114,27 @@ impl Preview {
         self.assets.insert((item, asset), value);
     }
 
+    /// Whether a worn wearable's read was asked for by this preview.
+    pub fn wants(&self, item: Uuid, asset: Uuid) -> bool {
+        self.requested.contains(&(item, asset))
+    }
+
     pub fn update(&mut self, world: &World, scene: &mut Scene, draft: &Draft) -> Vec<NetCommand> {
+        self.update_drafts(world, scene, &[draft])
+    }
+
+    /// The bakes of several drafts at once (the SL Character Creator's skin
+    /// and eyes, 2026-11-14): each draft stands in for its worn item, and
+    /// every bake any of them affects is composed of everything worn on it,
+    /// as the appearance editor composes the one it edits.
+    pub fn update_drafts(&mut self, world: &World, scene: &mut Scene, drafts: &[&Draft]) -> Vec<NetCommand> {
         self.active = true;
+        let affected: HashSet<usize> = drafts
+            .iter()
+            .flat_map(|draft| super::affected_bakes(draft.edited.kind).iter().copied())
+            .collect();
+        let kinds: Vec<u8> = drafts.iter().map(|draft| draft.edited.kind).collect();
+        let draft_of = |item: Uuid| drafts.iter().find(|draft| draft.item.id == item);
         let Some(cof) = crate::world::appearance::cof(&world.inventory) else {
             return Vec::new();
         };
@@ -134,7 +153,7 @@ impl Preview {
             .filter(|item| {
                 super::affected_bakes((item.flags & 0xff) as u8)
                     .iter()
-                    .any(|te| super::affected_bakes(draft.edited.kind).contains(te))
+                    .any(|te| affected.contains(te))
             })
             .cloned()
             .collect();
@@ -146,7 +165,7 @@ impl Preview {
         let mut commands = Vec::new();
         for item in &worn {
             let key = (item.id, item.asset_id);
-            if item.id != draft.item.id
+            if draft_of(item.id).is_none()
                 && !self.assets.contains_key(&key)
                 && !self.requested.contains(&key)
                 && !self.failed.contains(&key)
@@ -158,16 +177,15 @@ impl Preview {
         }
         if worn
             .iter()
-            .any(|item| item.id != draft.item.id && !self.assets.contains_key(&(item.id, item.asset_id)))
+            .any(|item| draft_of(item.id).is_none() && !self.assets.contains_key(&(item.id, item.asset_id)))
         {
             return commands;
         }
         let mut values = Vec::new();
         for item in worn {
-            let value = if item.id == draft.item.id {
-                Some(draft.edited.clone())
-            } else {
-                self.assets.get(&(item.id, item.asset_id)).cloned()
+            let value = match draft_of(item.id) {
+                Some(draft) => Some(draft.edited.clone()),
+                None => self.assets.get(&(item.id, item.asset_id)).cloned(),
             };
             if let Some(value) = value.filter(|value| u32::from(value.kind) == item.flags & 0xff) {
                 values.push(value)
@@ -185,7 +203,7 @@ impl Preview {
             .flat_map(|value| {
                 value.textures.iter().filter_map(|(slot, texture)| {
                     super::slot_bake(*slot)
-                        .filter(|te| super::affected_bakes(draft.edited.kind).contains(te))
+                        .filter(|te| affected.contains(te))
                         .map(|_| texture)
                 })
             })
@@ -222,7 +240,6 @@ impl Preview {
         };
         let lib = world.avatar_lib.clone();
         let base = world.server_visual_params().to_vec();
-        let kind = draft.edited.kind;
         let token = self.generation.clone();
         let generation = token.load(Ordering::Relaxed);
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -232,7 +249,7 @@ impl Preview {
         self.built = Some(generation);
         scene.jobs.execute(move || {
             let start = Instant::now();
-            let result = prepare(generation, &token, &pool, &lib, &base, kind, values, sources, &tx);
+            let result = prepare(generation, &token, &pool, &lib, &base, &kinds, values, sources, &tx);
             if token.load(Ordering::Relaxed) == generation {
                 if let Err(reason) = result {
                     let _ = tx.send(Reply::Failed(generation, reason));
@@ -347,7 +364,7 @@ fn prepare(
     pool: &aurora_render::StagingPool,
     lib: &crate::scene::avatar::AvatarLibrary,
     base: &[u8],
-    kind: u8,
+    kinds: &[u8],
     values: Vec<Wearable>,
     sources: HashMap<Uuid, PreviewSource>,
     tx: &crossbeam_channel::Sender<Reply>,
@@ -389,7 +406,11 @@ fn prepare(
             rgba: vec![0; 4].into(),
         }),
     );
-    for region in defs.regions.iter().filter(|region| defs.affected(region, kind)) {
+    for region in defs
+        .regions
+        .iter()
+        .filter(|region| kinds.iter().any(|kind| defs.affected(region, *kind)))
+    {
         if token.load(Ordering::Relaxed) != generation {
             return Ok(());
         }

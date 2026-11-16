@@ -408,7 +408,7 @@ fn demo_local_image(reloaded: bool) -> std::sync::Arc<aurora_assets::DecodedImag
     })
 }
 
-fn demo_asset(item: &aurora_net::inventory::InvItem, owner: uuid::Uuid) -> Result<Vec<u8>, String> {
+pub(super) fn demo_asset(item: &aurora_net::inventory::InvItem, owner: uuid::Uuid) -> Result<Vec<u8>, String> {
     let kind = (item.flags & 0xff) as u8;
     let bytes = crate::world::inventory::wearable::create(kind, &item.name, owner)?;
     if matches!(kind, 2 | 3) {

@@ -255,14 +255,20 @@ fn content_panel(ui: &mut egui::Ui, p: &Palette, creator: &mut Creator, images: 
         return false;
     }
     let sex = creator.sex;
-    // the shelves with something for this body (a body shelf shows both
-    // bodies: choosing the other one switches)
+    // the shelves the catalogue shows for this body (Catalogue::shelves)
     let shelves: Vec<(String, String)> = catalogue
-        .categories
-        .iter()
-        .filter(|c| catalogue.items.iter().any(|i| i.category == c.id && (c.body || i.sex.fits(sex))))
+        .shelves(sex)
+        .into_iter()
         .map(|c| (c.id.clone(), c.name.clone()))
         .collect();
+    // Until 2026-11-15 the window chose the shelves itself, hidden ones too
+    // (moved to Catalogue::shelves, which leaves the hidden Alphas out):
+    // let shelves: Vec<(String, String)> = catalogue
+    //     .categories
+    //     .iter()
+    //     .filter(|c| catalogue.items.iter().any(|i| i.category == c.id && (c.body || i.sex.fits(sex))))
+    //     .map(|c| (c.id.clone(), c.name.clone()))
+    //     .collect();
     if creator.view.shelf.as_ref().is_none_or(|s| !shelves.iter().any(|(id, _)| id == s)) {
         creator.view.shelf = shelves.first().map(|(id, _)| id.clone());
     }

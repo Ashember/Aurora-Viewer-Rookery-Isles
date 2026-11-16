@@ -68,6 +68,8 @@ impl App {
             return;
         };
         creator.close(&mut self.world);
+        // the body shows its bakes as worn again
+        self.sl_creator_bakes.cancel(&mut self.world);
         if let Some(saved) = creator.saved_panels.take() {
             self.panels = saved;
         }
@@ -114,7 +116,22 @@ impl App {
         let choice = crate::ui::sl_creator::show(ctx, p, &mut creator, &self.ui_images, height, busy);
         let dragging = ctx.dragged_id().is_some() || ctx.input(|i| i.pointer.any_down());
         creator.end_frame(&mut self.world, dragging);
+        // the skin and eyes composed onto the body here, as the appearance
+        // editor shows its edit (2026-11-14: they showed only once the bake
+        // had gone to the region and back, and the skin colour never)
+        if creator.take_bakes_stale() {
+            self.sl_creator_bakes.invalidate();
+        }
+        let drafts = creator.bake_drafts();
+        let bake_reads = if drafts.is_empty() {
+            Vec::new()
+        } else {
+            self.sl_creator_bakes.update_drafts(&self.world, &mut self.scene, &drafts)
+        };
         self.sl_creator = Some(creator);
+        for command in bake_reads {
+            self.sl_creator_send(command);
+        }
         match choice {
             Some(Choice::Save) => {
                 if let Some(creator) = &mut self.sl_creator {
@@ -170,16 +187,16 @@ impl App {
         }
         match command {
             NetCommand::PreviewInventoryItem(item) => {
-                let kind = (item.flags & 0xff) as u8;
+                // the appearance editor's demo wearables: their hair and eye
+                // textures are the demo's own, so the body's bakes can be
+                // composed offline (the grid's default ones never load here)
                 let data = self
                     .demo_documents
                     .get(&item.id)
                     .cloned()
                     .map(Ok)
-                    .unwrap_or_else(|| crate::world::inventory::wearable::create(kind, &item.name, self.world.agent_id));
-                if let Some(creator) = &mut self.sl_creator {
-                    creator.loaded(&self.world, item.id, item.asset_id, &data);
-                }
+                    .unwrap_or_else(|| super::wearable_editor::demo_asset(&item, self.world.agent_id));
+                self.sl_creator_loaded(item.id, item.asset_id, &data);
             }
             command @ NetCommand::SaveWearable { .. } => self.demo_save_wearable(command),
             command => self.send(command),
@@ -243,10 +260,14 @@ impl App {
 
     /// A worn part's asset for the creator; true when it asked for it.
     pub(super) fn sl_creator_loaded(&mut self, item: uuid::Uuid, asset: uuid::Uuid, result: &Result<Vec<u8>, String>) -> bool {
-        match &mut self.sl_creator {
+        // a worn wearable the body's bakes are composed of
+        let for_bakes = self.sl_creator_bakes.wants(item, asset);
+        self.sl_creator_bakes.loaded(item, asset, result);
+        let for_creator = match &mut self.sl_creator {
             Some(creator) => creator.loaded(&self.world, item, asset, result),
             None => false,
-        }
+        };
+        for_bakes || for_creator
     }
 
     /// A Library copy answered: taken by the creator when it asked for it
@@ -276,7 +297,8 @@ impl App {
     /// The offline demo (docs/TESTING.md, `AURORA_DEMO_SL_CREATOR`): the
     /// creator on a new character at frame 600 with the demo catalogue;
     /// `shaped` moves several sliders at frame 800, `male` switches to the
-    /// male body at frame 800, `face` frames the face at frame 900.
+    /// male body at frame 800, `skin` recolours the skin at frame 800,
+    /// `face` frames the face at frame 900.
     pub(super) fn demo_sl_creator(&mut self, ctx: &egui::Context, p: &crate::theme::Palette) {
         let modes = std::env::var("AURORA_DEMO_SL_CREATOR").unwrap_or_default();
         let has = |mode: &str| modes.split(',').any(|m| m.trim() == mode);
@@ -300,6 +322,12 @@ impl App {
                 let values: Vec<(Part, i32, f32)> = crate::sl_creator::DEMO_SHAPED.iter().map(|(id, v)| (Part::Shape, *id, *v)).collect();
                 creator.set_many(&mut self.world, &values);
                 log::info!("demo SL character creator: shaped {values:?}");
+            }
+            if has("skin")
+                && let Some(creator) = &mut self.sl_creator
+            {
+                creator.set_many(&mut self.world, &crate::sl_creator::DEMO_SKIN);
+                log::info!("demo SL character creator: skin colour {:?}", crate::sl_creator::DEMO_SKIN);
             }
         }
         if self.frame_count == 900 && has("face") && self.sl_creator.is_some() {

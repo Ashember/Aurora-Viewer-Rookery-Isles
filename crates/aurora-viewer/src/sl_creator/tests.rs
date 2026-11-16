@@ -487,3 +487,55 @@ fn a_refused_save_stops_with_its_message() {
     assert!(!creator.saving());
     assert_eq!(creator.message, aurora_i18n::tr!("slcreator-save-denied"));
 }
+
+/// Rigged mesh garments (2026-11-15): added, never sent to replace their
+/// attachment point; each brings its alpha cut and takes the one it replaces
+/// off by name, cut and all; clicked again it comes off; a body switch takes
+/// off what was fitted to the other body; the alpha cuts have no shelf.
+#[test]
+fn garments_bring_their_cuts_and_replace_each_other_by_name() {
+    let id = |n: u128| Uuid::from_u128(0x6a00_0000_0000_4000_8000_0000_0000_0000 | n);
+    let json = serde_json::json!({
+        "categories": [
+            {"key": "tops", "name": "Tops", "garment": true},
+            {"key": "alphas", "name": "Alphas", "hidden": true}
+        ],
+        "items": [
+            {"itemId": id(1).to_string(), "name": "Linen Shirt (Ruth2)", "assetType": 6, "category": "tops",
+             "sex": "female", "with": [id(2).to_string()], "credit": "by joepal, CC0"},
+            {"itemId": id(2).to_string(), "name": "Linen Shirt (Ruth2) alpha cut", "assetType": 5, "category": "alphas",
+             "sex": "female", "wearableType": "alpha"},
+            {"itemId": id(3).to_string(), "name": "Wool Sweater (Ruth2)", "assetType": 6, "category": "tops",
+             "sex": "female", "with": [id(4).to_string(), id(3).to_string()]},
+            {"itemId": id(4).to_string(), "name": "Wool Sweater (Ruth2) alpha cut", "assetType": 5, "category": "alphas",
+             "sex": "female", "wearableType": "alpha"}
+        ]
+    });
+    let catalogue = Catalogue::parse(json.to_string().as_bytes()).expect("catalogue");
+    let shelves: Vec<&str> = catalogue.shelves(Sex::Female).iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(shelves, ["tops"], "the alpha cuts have no shelf");
+    assert!(catalogue.category("tops").is_some_and(|c| c.garment && !c.hidden));
+    assert_eq!(catalogue.item(id(3)).expect("sweater").with, [id(4)], "an item never brings itself");
+    assert_eq!(catalogue.item(id(1)).expect("shirt").credit, "by joepal, CC0");
+
+    let mut creator = Creator::new("c1".into(), NAME.into(), None, true);
+    creator.set_catalogue(catalogue);
+    let wear = |item: Uuid| Job::Wear { item, replace: false, catalogue: Some(item) };
+    creator.choose(id(1));
+    assert_eq!(creator.queue.drain(..).collect::<Vec<_>>(), [wear(id(1)), wear(id(2))]);
+    creator.choose(id(3));
+    assert_eq!(
+        creator.queue.drain(..).collect::<Vec<_>>(),
+        [Job::Remove { item: id(1) }, Job::Remove { item: id(2) }, wear(id(3)), wear(id(4))]
+    );
+    creator.choose(id(3));
+    assert_eq!(creator.queue.drain(..).collect::<Vec<_>>(), [Job::Remove { item: id(3) }, Job::Remove { item: id(4) }]);
+    assert!(creator.chosen.get("tops").is_none());
+    // a body switch takes off what was fitted to the other body
+    creator.choose(id(1));
+    creator.queue.clear();
+    creator.set_sex(Sex::Male);
+    let jobs: Vec<Job> = creator.queue.drain(..).collect();
+    assert!(jobs.contains(&Job::Remove { item: id(1) }) && jobs.contains(&Job::Remove { item: id(2) }), "{jobs:?}");
+    assert!(creator.chosen.get("tops").is_none());
+}

@@ -62,6 +62,14 @@ pub struct Category {
     /// Items worn together (jewelry, accessories) rather than one at a
     /// time in place of each other.
     pub stacking: bool,
+    /// No shelf of its own (the grid's `hidden`): its items are defaults or
+    /// come along with others (alpha cuts with their garments). 2026-11-15.
+    pub hidden: bool,
+    /// A shelf of rigged mesh garments (the grid's `garment`): each is added
+    /// to what is worn, never sent to replace what is on its attachment
+    /// point (a starter body wears its own pieces on points), and the one it
+    /// takes the place of comes off by name. 2026-11-15.
+    pub garment: bool,
 }
 
 /// One item of the catalogue: a Library inventory item.
@@ -90,6 +98,9 @@ pub struct Item {
     /// The bodies whose new characters wear it first (the grid's
     /// `defaultFor`, from its starter defaults file). 2026-11-14.
     pub default_for: Vec<Sex>,
+    /// Catalogue items worn with it and taken off with it (the grid's
+    /// `with`: a garment's alpha cut). 2026-11-15.
+    pub with: Vec<Uuid>,
 }
 
 impl Item {
@@ -156,15 +167,22 @@ fn uuid(value: &Value, keys: &[&str]) -> Option<Uuid> {
 }
 
 fn category_of(value: &Value) -> Option<Category> {
-    let (id, name, body, stacking) = match value {
+    let (id, name, body, stacking, hidden, garment) = match value {
         Value::String(name) => {
             let name = name.trim().to_owned();
-            (name.clone(), name, None, None)
+            (name.clone(), name, None, None, false, false)
         }
         Value::Object(_) => {
             let name = text(value, &["name", "title", "label"]);
             let id = text(value, &["id", "key", "slug"]).or_else(|| name.clone())?;
-            (id.clone(), name.unwrap_or(id), flag(value, "body"), flag(value, "stacking"))
+            (
+                id.clone(),
+                name.unwrap_or(id),
+                flag(value, "body"),
+                flag(value, "stacking"),
+                flag(value, "hidden").unwrap_or(false),
+                flag(value, "garment").unwrap_or(false),
+            )
         }
         _ => return None,
     };
@@ -175,6 +193,8 @@ fn category_of(value: &Value) -> Option<Category> {
     Some(Category {
         body: body.unwrap_or_else(|| lower.iter().any(|n| BODY_NAMES.contains(&n.as_str()))),
         stacking: stacking.unwrap_or_else(|| lower.iter().any(|n| STACKING_NAMES.contains(&n.as_str()))),
+        hidden,
+        garment,
         id,
         name,
     })
@@ -212,6 +232,16 @@ fn item_of(value: &Value) -> Option<Item> {
             .filter_map(Value::as_str)
             .map(Sex::parse)
             .filter(|sex| *sex != Sex::Any)
+            .collect(),
+        with: value
+            .get("with")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .filter_map(|s| Uuid::parse_str(s.trim()).ok())
+            // never itself, which would wear and take off twice
+            .filter(|other| !other.is_nil() && *other != id)
             .collect(),
     })
 }
@@ -258,9 +288,22 @@ impl Catalogue {
                 name: aurora_i18n::tr!("slcreator-category-other").to_owned(),
                 body: false,
                 stacking: false,
+                hidden: false,
+                garment: false,
             });
         }
         Ok(catalogue)
+    }
+
+    /// The shelves the content browser shows for a body: those with
+    /// something for it (a body shelf shows both bodies: choosing the other
+    /// one switches), never a hidden one. 2026-11-15: moved here from the
+    /// window, which filtered without the hidden shelves.
+    pub fn shelves(&self, body: Sex) -> Vec<&Category> {
+        self.categories
+            .iter()
+            .filter(|c| !c.hidden && self.items.iter().any(|i| i.category == c.id && (c.body || i.sex.fits(body))))
+            .collect()
     }
 
     pub fn category(&self, id: &str) -> Option<&Category> {
